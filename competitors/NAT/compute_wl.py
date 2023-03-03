@@ -1,33 +1,193 @@
 import sys
-sys.path.append("/home/mungari/Desktop/evograph/components/") # todo relative
-
 import numpy as np
 import torch
 import networkx as nx
 from time import time
 import torch_geometric
-from wl_test import compute_similarity
 import os
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-def loadList(filename):
+from utils import loadList
+import argparse
 
-    if "synthetic" in filename:
-        # the filename should mention the extension 'npy'
-        tempNumpyArray = np.load(filename, allow_pickle=True)
-        snap = tempNumpyArray.tolist()
-    else:
-        snap = torch.load(filename)
+import numpy as np
+from six import itervalues
 
-    return snap
+from grakel.kernels.vertex_histogram import VertexHistogram
+from grakel.graph import Graph
+
+from scipy.special import rel_entr
+
+def generate_graphs(label_count, WL_labels_inverse, n_iter, nx, L, Gs_ed, extras, _inv_labels, in_edges_mapping=False, max_diameter=5):
+    count_colors_before = 0
+    count_colors_now = 0
+    count_colors = True
+    count_colors_iteration_stop = -1
+
+    check_diameter = True
+    diameter_iteration_stop = -1
+    new_graphs = list()
+    for j in range(nx):
+        new_labels = dict()
+        for k in L[j].keys():
+            new_labels[k] = WL_labels_inverse[L[j][k]]
+        L[j] = new_labels
+        # add new labels
+        new_graphs.append((Gs_ed[j], new_labels) + extras[j])
+    yield new_graphs, count_colors_iteration_stop, diameter_iteration_stop
+
+    for i in range(1, n_iter):
+        if i == max_diameter + 1 and check_diameter:  # max_diameter+1 because the loop starts from 1
+            # print("DIAMETER ARRIVED")
+            diameter_iteration_stop = i
+            check_diameter = False
+        label_set, WL_labels_inverse, L_temp = set(), dict(), dict()
+        for j in range(nx):
+            # Find unique labels and sort
+            # them for both graphs
+            # Keep for each node the temporary
+            L_temp[j] = dict()
+
+            for v in Gs_ed[j].keys():
+                credential = str(L[j][v]) + "," + str(sorted([L[j][n] for n in Gs_ed[j][v].keys()]))
+
+                if in_edges_mapping:
+                    in_edges = []
+                    for n in Gs_ed[j].keys():
+                        if v in Gs_ed[j][n].keys():
+                            in_edges.append(L[j][n])
+                    credential += "," + str(sorted(in_edges))
+
+                L_temp[j][v] = credential
+                label_set.add(credential)
+
+        label_list = sorted(list(label_set))
+        for dv in label_list:
+            WL_labels_inverse[dv] = label_count
+            label_count += 1
+
+        count_colors_now = len(WL_labels_inverse.keys())
+        if count_colors_now == count_colors_before and count_colors:
+            # print("SAME COLOUR MAPPINGS")
+            count_colors_iteration_stop = i
+            count_colors = False
+
+        count_colors_before = count_colors_now
+
+        # Recalculate labels
+        new_graphs = list()
+        for j in range(nx):
+            new_labels = dict()
+            for k in L_temp[j].keys():
+                new_labels[k] = WL_labels_inverse[L_temp[j][k]]
+            L[j] = new_labels
+            # relabel
+            new_graphs.append((Gs_ed[j], new_labels) + extras[j])
+        _inv_labels[i] = WL_labels_inverse
+        yield new_graphs, count_colors_iteration_stop, diameter_iteration_stop
+
+
+def compute_metric(kernels, similarity_metric="cosine", steps=50):
+    K = np.sum(np.array(kernels), axis=0)
+    similarities = np.zeros(K.shape)
+
+    # normalizer = Normalizer()
+
+    if similarity_metric == "cosine":
+        _X_diag = np.diagonal(K)
+        similarities = K / np.sqrt(np.outer(_X_diag, _X_diag))
+        similarities = np.around(similarities, decimals=4)
+
+    elif similarity_metric == "kl":
+        for i in range(len(K)):
+            for j in range(len(K)):
+                kl_1 = sum(rel_entr(K[i], K[j]))
+                kl_2 = sum(rel_entr(K[j], K[i]))
+                similarities[i][j] = np.around((kl_1 + kl_2) / 2, decimals=4)
+    #         similarities = normalizer.fit_transform(similarities)
+
+    elif similarity_metric == "l2":
+        for i in range(len(K)):
+            for j in range(len(K)):
+                similarities[i][j] = np.around(np.linalg.norm(K[i] - K[j]), decimals=4)
+    #         similarities = normalizer.fit_transform(similarities)
+
+    return similarities
+
+
+def compute_similarity(X, n_iter=10, graph_format="dictionary", similarity_metric="cosine", max_diameter=5, in_edges_mapping=False):
+    nx = 0
+    Gs_ed, L, distinct_values, extras = dict(), dict(), set(), dict()
+    Xs = []
+
+    for (idx, x) in enumerate(iter(X)):
+
+        if len(x) > 2:
+            extra = tuple()
+            if len(x) > 3:
+                extra = tuple(x[3:])
+            x = Graph(x[0], x[1], x[2], graph_format=graph_format)
+            extra = (x.get_labels(purpose=graph_format,
+                                  label_type="edge", return_none=True),) + extra
+        else:
+            x = Graph(x[0], x[1], {}, graph_format=graph_format)
+            extra = tuple()
+
+        Xs.append(x)
+        Gs_ed[nx] = x.get_edge_dictionary()
+        L[nx] = x.get_labels(purpose="dictionary")
+        extras[nx] = extra
+        distinct_values |= set(itervalues(L[nx]))
+        nx += 1
+
+    # Save the number of "fitted" graphs.
+    _nx = nx
+
+    # get all the distinct values of current labels
+    WL_labels_inverse = dict()
+
+    # assign a number to each label
+    label_count = 0
+    for dv in sorted(list(distinct_values)):
+        WL_labels_inverse[dv] = label_count
+        label_count += 1
+
+    # Initalize an inverse dictionary of labels for all iterations
+    _inv_labels = dict()
+    _inv_labels[0] = WL_labels_inverse
+
+    base_kernels = {i: VertexHistogram() for i in range(n_iter)}
+    generated_graphs_kernels = []
+
+    same_coloring_step = 1
+    max_diameter_step = 1
+
+
+    for (i, values) in enumerate(generate_graphs(label_count, WL_labels_inverse, n_iter, nx, L, Gs_ed, extras, _inv_labels,
+                                                 in_edges_mapping=in_edges_mapping, max_diameter=max_diameter)):
+
+        g, same_coloring_step_temp, max_diameter_step_temp = values
+
+        if same_coloring_step_temp != -1:
+            same_coloring_step = same_coloring_step_temp
+        if max_diameter_step_temp != -1:
+            max_diameter_step = max_diameter_step_temp
+
+        k = base_kernels[i].fit_transform(g)
+        generated_graphs_kernels.append(k)
+
+    all_steps = compute_metric(kernels=generated_graphs_kernels, similarity_metric=similarity_metric, steps=n_iter)
+    same_coloring = compute_metric(kernels=generated_graphs_kernels[:same_coloring_step], similarity_metric=similarity_metric, steps=n_iter)
+    max_diameter = compute_metric(kernels=generated_graphs_kernels[:max_diameter_step], similarity_metric=similarity_metric, steps=n_iter)
+
+    return all_steps, same_coloring, max_diameter
 
 def parallel_WL_test(params, graphs_indexes, data):
 
     max_diameter = params['max_diameter']
     dataset = params['dataset']
-    WL_start = params['WL_start']
-    split_percentage = params['split_percentage']
+    perc_train = params['perc_train']
     factor = params['factor']
     end_filename = params['end_filename']
 
@@ -35,47 +195,34 @@ def parallel_WL_test(params, graphs_indexes, data):
     for graph_index in tqdm(graphs_indexes):
     #     print(graph_index)
 
-        G_pred = torch.load("/mnt/nas/mungari/evograph/generated_data/{}/generated_{}_graphs/NAT/{}_{}/graph_{}.pt".format(split_percentage, dataset, factor, end_filename, graph_index))
+        G_pred = torch.load("./generated_data/{}/generated_{}_graphs/NAT/{}_{}/graph_{}.pt".format(perc_train, dataset, factor, end_filename, graph_index))
         G_pred = torch_geometric.utils.convert.to_networkx(G_pred)
 
-        if params['WL_type'] == 'last_graph':
-            G_real = data[-1]
-        else:
-            G_real = data[graph_index]
+        G_real = data[graph_index]
         G_real = torch_geometric.utils.convert.to_networkx(G_real)
 
         max_nodes = max([G_real.number_of_nodes(), G_pred.number_of_nodes()])
 
         labels = {}
 
-        if WL_start == 'degree':
+        degrees = {}
+        color_count = 0
+        for g in [G_real, G_pred]:
+            for i in np.unique(g.nodes()):
+                # print(g.degree(i))
+                if g.degree(i) not in degrees.keys():
+                    degrees[g.degree(i)] = color_count
+                    color_count += 1
 
-            degrees = {}
-            color_count = 0
-            for g in [G_real, G_pred]:
-                for i in np.unique(g.nodes()):
-                    # print(g.degree(i))
-                    if g.degree(i) not in degrees.keys():
-                        degrees[g.degree(i)] = color_count
-                        color_count += 1
+        for g in [G_real, G_pred]:
+            labels[g] = {}
+            for i in np.unique(g.nodes()):
+                labels[g][i] = degrees[g.degree(i)]
 
-            for g in [G_real, G_pred]:
-                labels[g] = {}
-                for i in np.unique(g.nodes()):
-                    labels[g][i] = degrees[g.degree(i)]
+        X = []
 
-            X = []
-
-            for g in [G_real, G_pred]:
-                X.append([list(g.edges()), labels[g].copy()])
-
-        elif WL_start == 'uniform':
-            for i in range(max_nodes):
-                labels[i] = 0
-
-            X = []
-            for g in [G_real, G_pred]:
-                X.append([list(g.edges()), labels.copy()])
+        for g in [G_real, G_pred]:
+            X.append([list(g.edges()), labels[g].copy()])
 
 
         res = compute_similarity(X, n_iter=max_diameter*2, graph_format="dictionary", similarity_metric="cosine",
@@ -88,8 +235,6 @@ def parallel_WL_test(params, graphs_indexes, data):
 
 def compute_wl(params, data):
 
-    if params['WL_type'] == 'last_graph':
-        params['num_generations'] = 1
 
     n_jobs = 1
 
@@ -133,101 +278,72 @@ def compute_wl(params, data):
                                                            mean_diameter, percentile_diameter))
 
 
-    if not os.path.exists("/mnt/nas/mungari/evograph/wl_results/{}/".format(params['split_percentage'])):
-        os.makedirs("/mnt/nas/mungari/evograph/wl_results/{}".format(params['split_percentage']))
+    if not os.path.exists("./wl_results/{}/".format(params['perc_train'])):
+        os.makedirs("./wl_results/{}".format(params['perc_train']))
 
-    if not os.path.exists("results/"):
-        os.makedirs("results/")
-
-    f = open("/mnt/nas/mungari/evograph/wl_results/{}/{}_NAT_{}_{}.tsv".format(params['split_percentage'], params['dataset'], params['factor'], params['end_filename']), "w")
+    f = open("./wl_results/{}/{}_{}_{}.tsv".format(params['perc_train'], params['dataset'], params['factor'], params['end_filename']), "w")
     f.write("Count\tAll_Step\tColoring_Stable\tDiameter\n")
     for i in range(len(results_all_steps)):
         f.write("{}\t{}\t{}\t{}\n".format(i, results_all_steps[i], results_coloring_stable[i], results_diameter[i]))
     f.close()
 
-    if not os.path.exists("{}_{}_{}_results_{}.tsv".format(params['split_percentage'], params['dataset'], params['factor'], params['end_filename'])):
-        f = open("{}_{}_{}_results_{}.tsv".format(params['split_percentage'], params['dataset'], params['factor'], params['end_filename']), "w")
-        f.write("Baseline\tWL_Start\tWL_Type\tStopCondition\tMean\t90Percentile\n")
-        f.close()
 
-    f = open("{}_{}_{}_results_{}.tsv".format(params['split_percentage'], params['dataset'], params['factor'], params['end_filename']), "a")
-    f.write("NAT\t{}\t{}\t{}\t{}\t{}\n".format(params['WL_start'], params['WL_type'],
-                                              "All Steps", mean_all_steps, percentile_all_steps))
-    f.write("NAT\t{}\t{}\t{}\t{}\t{}\n".format(params['WL_start'], params['WL_type'],
-                                              "Coloring Stable", mean_coloring_stable, percentile_coloring_stable))
-    f.write("NAT\t{}\t{}\t{}\t{}\t{}\n".format(params['WL_start'], params['WL_type'],
-                                              "Diameter", mean_diameter, percentile_diameter))
-    f.close()
+parser = argparse.ArgumentParser('Interface for propressing csv source data for NAT framework')
+parser.add_argument('--data', type=str)
+parser.add_argument('--extension', type=str)
+parser.add_argument('--perc_train', type=float)
+parser.add_argument('--n_degree', type=str)
+parser.add_argument('--ngh_dim', type=int)
+parser.add_argument('--validation_set', type=str)
 
-datasets = sys.argv[1].split("-")
-dataset_extensions_list = sys.argv[2].split("-")
-users = sys.argv[3]
-split_percentages = [float(f) for f in sys.argv[4].split("-")]
-ngh_dims = sys.argv[6].split("-")
-n_degrees = [x.split(",") for x in sys.argv[5].split("-")]
-end_filename = "val" if sys.argv[10] == "True" else "test"
+
+args = parser.parse_args()
+
+dataset = args.data
+dataset_extension = args.extension
+perc_train = args.perc_train
+n_degree = [int(x) for x in args.n_degree.split(",")]
+ngh_dim = args.ngh_dim
+end_filename = "val" if args.validation_set == "True" else "test"
 
 print(sys.argv)
 
-for i in range(len(split_percentages)):
-    train_percentage = float(split_percentages[i])
-    for j in range(len(datasets)):
-        for ngh_dim in ngh_dims:
-            ngh_dim = int(ngh_dim)
-            for n_degree in n_degrees:
-                n_degree = [int(x) for x in n_degree]
+factor = "{}_{}_{}".format(ngh_dim, n_degree[0], n_degree[1])
 
-                factor = "{}_{}_{}".format(ngh_dim, n_degree[0], n_degree[1])
-                dataset = datasets[j]
-                dataset_extension = dataset_extensions_list[j]
-                split_percentage = split_percentages[i]
-                # factor = factors_list[k]
-                print(dataset, dataset_extension, split_percentage, factor, end_filename)
+snap=loadList('../../data/{}'.format(dataset+dataset_extension))
 
-                snap=loadList('/mnt/nas/{}/evograph/data/{}'.format(users, dataset+dataset_extension))
+seed = 12345
 
-                seed = 12345
+amount = len(snap)
 
+perc_val_test = (1 - perc_train) / 2.0
 
-                #DEBUG
-                # snap = snap[:1000]
-                # snap = np.array(snap)
+train_size = int(amount * perc_train)
+val_size = int(amount * perc_val_test)
 
-                amount = len(snap)
-                print(amount)
+train_set = snap[0:train_size]
+val_set = snap[train_size:train_size + val_size]
+test_set = snap[train_size + val_size: ]
 
-                perc_train = split_percentage
-                perc_val_test = (1 - perc_train) / 2.0
+# print(test_set[0])
+if type(snap[0]) == list:
+    snap = np.array(snap)[:, 4]
+    train_set = snap[0:train_size]
+    val_set = snap[train_size:train_size + val_size]
+    test_set = snap[train_size + val_size:]
 
-                train_size = int(amount * perc_train)
-                val_size = int(amount * perc_val_test)
+# print(test_set[0])
+# print(test_set)
 
-                train_set = snap[0:train_size]
-                val_set = snap[train_size:train_size + val_size]
-                test_set = snap[train_size + val_size: ]
+params = {}
+params['seed'] = seed
+params['dataset'] = dataset
+params['num_generations'] = len(val_set) if end_filename == "val" else len(test_set)
+params['perc_train'] = perc_train
+params['factor'] = factor
+params['end_filename'] = end_filename
 
-                # print(test_set[0])
-                if type(snap[0]) == list:
-                    snap = np.array(snap)[:, 4]
-                    train_set = snap[0:train_size]
-                    val_set = snap[train_size:train_size + val_size]
-                    test_set = snap[train_size + val_size:]
-
-                # print(test_set[0])
-                # print(test_set)
-
-                params = {}
-                params['metric'] = sys.argv[7] # WL, MMD
-                params['WL_start'] = sys.argv[8] #'degree' # uniform, degree
-                params['WL_type'] = sys.argv[9] #'averaged' # averaged, last_graph
-                params['seed'] = seed
-                params['dataset'] = dataset
-                params['num_generations'] = len(val_set) if end_filename == "val" else len(test_set)
-                params['split_percentage'] = split_percentage
-                params['factor'] = factor
-                params['end_filename'] = end_filename
-
-                if end_filename == "val":
-                    compute_wl(params, val_set)
-                else:
-                    compute_wl(params, test_set)
+if end_filename == "val":
+    compute_wl(params, val_set)
+else:
+    compute_wl(params, test_set)

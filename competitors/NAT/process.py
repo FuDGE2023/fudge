@@ -185,7 +185,7 @@ def run(args):
 
     node_edge_feat_dim = args.node_edge_feat_dim
     # PATH = './processed/{}.csv'.format(data_name)
-    PATH = '/mnt/nas/liguori/evograph/data/{}'.format(data_name + args.extension)
+    PATH = '../../data/{}'.format(data_name + args.extension)
     OUT_DF = './processed/ml_{}.csv'.format(data_name)
     OUT_FEAT = './processed/ml_{}.npy'.format(data_name)
     OUT_NODE_FEAT = './processed/ml_{}_node.npy'.format(data_name)

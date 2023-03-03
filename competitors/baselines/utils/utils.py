@@ -44,7 +44,6 @@ def parallel_WL_test(params, graphs_indexes, test_set):
 
     max_diameter = params['max_diameter']
     baseline = params['baseline']
-    WL_start = params['WL_start']
     full_generation_path = params['full_generation_path']
 
     results = []
@@ -54,44 +53,31 @@ def parallel_WL_test(params, graphs_indexes, test_set):
         G_pred = torch.load("{}/{}/graph_{}.pt".format(full_generation_path, baseline, graph_index))
         G_pred = torch_geometric.utils.convert.to_networkx(G_pred)
 
-        if params['WL_type'] == 'last_graph':
-            G_real = test_set[-1]
-        else:
-            G_real = test_set[graph_index]
+        G_real = test_set[graph_index]
         G_real = torch_geometric.utils.convert.to_networkx(G_real)
 
         max_nodes = max([G_real.number_of_nodes(), G_pred.number_of_nodes()])
 
         labels = {}
 
-        if WL_start == 'degree':
+        degrees = {}
+        color_count = 0
+        for g in [G_real, G_pred]:
+            for i in np.unique(g.nodes()):
+                # print(g.degree(i))
+                if g.degree(i) not in degrees.keys():
+                    degrees[g.degree(i)] = color_count
+                    color_count += 1
 
-            degrees = {}
-            color_count = 0
-            for g in [G_real, G_pred]:
-                for i in np.unique(g.nodes()):
-                    # print(g.degree(i))
-                    if g.degree(i) not in degrees.keys():
-                        degrees[g.degree(i)] = color_count
-                        color_count += 1
+        for g in [G_real, G_pred]:
+            labels[g] = {}
+            for i in np.unique(g.nodes()):
+                labels[g][i] = degrees[g.degree(i)]
 
-            for g in [G_real, G_pred]:
-                labels[g] = {}
-                for i in np.unique(g.nodes()):
-                    labels[g][i] = degrees[g.degree(i)]
+        X = []
 
-            X = []
-
-            for g in [G_real, G_pred]:
-                X.append([list(g.edges()), labels[g].copy()])
-
-        elif WL_start == 'uniform':
-            for i in range(max_nodes):
-                labels[i] = 0
-
-            X = []
-            for g in [G_real, G_pred]:
-                X.append([list(g.edges()), labels.copy()])
+        for g in [G_real, G_pred]:
+            X.append([list(g.edges()), labels[g].copy()])
 
 
         res = compute_similarity(X, n_iter=max_diameter * 2, graph_format="dictionary", similarity_metric="cosine",
@@ -103,9 +89,6 @@ def parallel_WL_test(params, graphs_indexes, test_set):
     return results
 
 def compute_wl(params, test_set):
-
-    if params['WL_type'] == 'last_graph':
-        params['num_generations'] = 1
 
     n_jobs = 1
 

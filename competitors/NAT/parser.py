@@ -30,7 +30,7 @@ def get_args():
   parser.add_argument('--tolerance', type=float, default=1e-3,
             help='toleratd margainal improvement for early stopper')
 
-  parser.add_argument('--train_percentage', type=str)
+  parser.add_argument('--perc_train', type=str)
   parser.add_argument('--validation_set', type=str, default="False")
   parser.add_argument('--need_regressor', type=str, default="False")
 

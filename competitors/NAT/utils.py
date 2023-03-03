@@ -5,6 +5,17 @@ import random
 import statistics
 import math
 
+
+def loadList(filename):
+  if "synthetic" in filename:
+    # the filename should mention the extension 'npy'
+    tempNumpyArray = np.load(filename, allow_pickle=True)
+    snap = tempNumpyArray.tolist()
+  else:
+    snap = torch.load(filename)
+
+  return snap
+
 class EarlyStopMonitor(object):
   def __init__(self, max_round=3, higher_better=True, tolerance=1e-3):
     self.max_round = max_round
@@ -68,3 +79,14 @@ def nat_results(logger, arr, name):
   logger.info("Standard deviation " + str(statistics.pstdev(arr)))
   logger.info("95% " + str(1.96 * 100 * statistics.pstdev(arr) / math.sqrt(len(arr))))
   logger.info("--------")
+
+def graph_statistics(G, torch_g=False):
+  if not torch_g:
+    G = to_networkx(G, to_undirected=False)
+
+  print('Max diameter in G: ')
+  diameter = max([max(j.values()) for (i, j) in nx.shortest_path_length(G)])
+  print(diameter)
+  print('-----' * 20)
+
+  print('Average coef. clustering: ', nx.average_clustering(G))
