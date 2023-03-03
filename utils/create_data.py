@@ -152,15 +152,30 @@ def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_da
 
     print('Generation ...')
 
-    amount = len(snap_generation)
-    perc_val_test = (1 - perc_train) / 2
-
+    perc_val_test = (1. - perc_train) / 2
+    amount = len(snap_regression)
     train_size = int(amount * perc_train)
     val_size = int(amount * perc_val_test)
 
-    train_set_gen = snap_generation[0:train_size]
-    val_set_gen = snap_generation[train_size: train_size + val_size]
-    test_set_gen = snap_generation[train_size + val_size:]
+    train_set_reg = snap_regression[0:train_size]
+    val_set_reg = snap_regression[train_size:train_size + val_size]
+    test_set_reg = snap_regression[train_size + val_size:]
+
+    ####
+
+    train_size_regression = 0
+    for d in train_set_reg:
+        n_operations = d.n_operation
+        train_size_regression += n_operations
+
+    val_size_regression = train_size_regression
+    for d in val_set_reg:
+        n_operations = d.n_operation
+        val_size_regression += n_operations
+
+    train_set_gen = snap_generation[0:train_size_regression]
+    val_set_gen = snap_generation[train_size_regression:train_size_regression + val_size_regression]
+    test_set_gen = snap_generation[train_size_regression + val_size_regression:]
 
     x_sequences_train, y_sequences_train = create_sequences(train_set_gen, window_size, window_shift)
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
@@ -170,13 +185,8 @@ def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_da
     snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
     snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
 
-    amount = len(snap_regression)
-    train_size = int(amount * perc_train)
-    val_size = int(amount * perc_val_test)
-
-    train_set_reg = snap_regression[0:train_size]
-    val_set_reg = snap_regression[train_size: train_size + val_size]
-    test_set_reg = snap_regression[train_size + val_size:]
+    print('Last train gen: ', train_set_gen[-1])
+    print('Last train reg: ', train_set_reg[-1])
 
     return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
 
