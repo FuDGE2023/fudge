@@ -1,0 +1,17 @@
+{
+  "n_gpu": "2",
+  "dataset": "eu_core_no_dupl",
+  "file_name": "../../data/email-Eu-core-temporal.txt",
+  "data_path": "../../data/snapshots_regression_eu_core_no_dupl.pt",
+  "space_wl_results": "./results_wl",
+  "folder_generation_graphs": "./generated_graphs",
+  "perc_train": 0.7,
+  "create_data": 1,
+  "generate_test": 1,
+  "compute_wl": 1,
+  "compute_statistics": 1,
+  "need_regressor": 1,
+  "baseline": "POWER",
+  "WL_start": "degree",
+  "WL_type": "averaged"
+}
