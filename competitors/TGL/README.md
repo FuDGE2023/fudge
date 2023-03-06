@@ -13,11 +13,11 @@ Parameters semantic:
 * --factor -> TGL available variants: TGN, TGAT, JODIE, DySAT
 
 Steps to run the experiments:
-0) TGL Sampler
+1) TGL Sampler
 ```
 python setup.py build_ext --inplace
 ```
-1) Dataset processing
+2) Dataset processing
 ```
 python create_data.py --data dataset_name --extension dataset_extension --perc_train 0.7
 python gen_graph.py --data dataset_name+perc_train
@@ -27,7 +27,7 @@ python create_data.py --data snapshots_regression_bitcoin_alpha_edge_weights --e
 python gen_graph.py --data snapshots_regression_bitcoin_alpha_edge_weights_0.7
 ```
 
-2) Training
+3) Training
 ```
 python train.py --data dataset_name+perc_train --config path_configuration --gpu 0
 
@@ -35,17 +35,17 @@ Example:
 python train.py --data snapshots_regression_bitcoin_alpha_edge_weights --config config/TGN.yml --gpu 0
 ```
 
-3) Graph generation
+4) Graph generation
 ```
 python generate_graphs.py --data dataset_name+perc_train --config path_configuration --gpu 0 --perc_train 0.7 --need_regressor True --validation_set True
 ```
 
-4) WL score
+5) WL score
 ```
 python compute_wl.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --validation_set True
 ```
 
-5) Graph statistics
+6) Graph statistics
 ```
 python compute_statistics.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --validation_set True
 ```
