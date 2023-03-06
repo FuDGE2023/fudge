@@ -8,6 +8,7 @@ Parameters semantic:
 * --extension --> dataset extension
 * --perc_train --> train set percentage
 * --validation_set --> True if the computation has to be on the validation set, False for the test set
+* --need_regressor --> True if the dataset can have multiple operations per timestamp, False otherwise
 
 
 Steps to run the experiments:

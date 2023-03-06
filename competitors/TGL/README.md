@@ -13,6 +13,10 @@ Parameters semantic:
 * --factor -> TGL available variants: TGN, TGAT, JODIE, DySAT
 
 Steps to run the experiments:
+0) TGL Sampler
+```
+python setup.py build_ext --inplace
+```
 1) Dataset processing
 ```
 python create_data.py --data dataset_name --extension dataset_extension --perc_train 0.7
