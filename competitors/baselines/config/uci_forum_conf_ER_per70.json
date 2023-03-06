@@ -1,0 +1,15 @@
+{
+  "n_gpu": "2",
+  "dataset": "uci_forum_no_dupl",
+  "file_name": "../../data/uci_forum.opsahl-ucforum",
+  "data_path": "../../data/snapshots_regression_uci_forum_no_dupl.pt",
+  "space_wl_results": "./results_wl",
+  "folder_generation_graphs": "./generated_graphs",
+  "perc_train": 0.7,
+  "create_data": 1,
+  "generate_test": 1,
+  "compute_wl": 1,
+  "compute_statistics": 1,
+  "need_regressor": 1,
+  "baseline": "ER"
+}
