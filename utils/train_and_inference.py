@@ -254,7 +254,6 @@ def compute_metrics_synthetic(params):
 
 
 def run_synthetic_data(params):
-    from model.trainer_remove import Trainer
     from utils.utils import run_generation_synthetic
     window_size = params['window_size']
     window_shift = params['window_shift']
@@ -265,32 +264,81 @@ def run_synthetic_data(params):
     folder_generation_graphs = params['folder_generation_graphs']
     space_plot_losses = params['space_plot_losses']
 
-    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
-    exp = f'fact_{f}_{split}_new'
-
     params['out_dim_encoder'] = params['z_dim_encoder'] + (params['num_layer_encoder'] - 1) * params[
         'h_dim_encoder']
 
-    params['exp'] = exp
+    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
 
-    params['gnn_history_event'] = f'{checkpoint}/gnn_history_event_' + dataset + '_' + exp + '.pt'
-    params['rnn_history_event'] = f'{checkpoint}/rnn_history_event_' + dataset + '_' + exp + '.pt'
-    params['event_network'] = f'{checkpoint}/event_network' + dataset + '_' + exp + '.pt'
-    params['gnn_history_source'] = f'{checkpoint}/gnn_history_source_' + dataset + '_' + exp + '.pt'
-    params['rnn_history_source'] = f'{checkpoint}/rnn_history_source_' + dataset + '_' + exp + '.pt'
-    params['gnn_aux_add_source'] = f'{checkpoint}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
-    params['net_source'] = f'{checkpoint}/net_source_' + dataset + '_' + exp + '.pt'
-    params['gnn_history_dest'] = f'{checkpoint}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
-    params['rnn_history_dest'] = f'{checkpoint}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
-    params['gnn_aux_add_dest'] = f'{checkpoint}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
-    params['net_dest'] = f'{checkpoint}/net_dest_' + dataset + '_' + exp + '.pt'
+    if params['model_name'] == 'fudge_h_a':
+        from model.trainer_remove_ablation1 import Trainer
+        exp = f'fact_{f}_{split}_ablation1'
+        params['exp'] = exp
+
+        params['gnn_history'] = f'{checkpoint}/ablation/gnn_history_' + dataset + '_' + exp + '.pt'
+        params['rnn_history'] = f'{checkpoint}/ablation/rnn_history_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux'] = f'{checkpoint}/ablation/gnn_aux_' + dataset + '_' + exp + '.pt'
+
+        params['event_network'] = f'{checkpoint}/ablation/event_network' + dataset + '_' + exp + '.pt'
+        params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
+        params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
+    elif params['model_name'] == 'fudge_h_2a':
+        from model.trainer_remove_ablation2 import Trainer
+        exp = f'fact_{f}_{split}_ablation2'
+        params['exp'] = exp
+
+        params['gnn_history'] = f'{checkpoint}/ablation/gnn_history_' + dataset + '_' + exp + '.pt'
+        params['rnn_history'] = f'{checkpoint}/ablation/rnn_history_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_source'] = f'{checkpoint}/ablation/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_dest'] = f'{checkpoint}/ablation/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
+
+        params['event_network'] = f'{checkpoint}/ablation/event_network' + dataset + '_' + exp + '.pt'
+        params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
+        params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
+
+    elif params['model_name'] == 'fudge_3h_a':
+        from model.trainer_remove_ablation3 import Trainer
+        exp = f'fact_{f}_{split}_ablation3'
+        params['exp'] = exp
+
+        params['gnn_history_event'] = f'{checkpoint}/ablation/gnn_history_event_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_event'] = f'{checkpoint}/ablation/rnn_history_event_' + dataset + '_' + exp + '.pt'
+
+        params['gnn_history_source'] = f'{checkpoint}/ablation/gnn_history_source_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_source'] = f'{checkpoint}/ablation/rnn_history_source_' + dataset + '_' + exp + '.pt'
+
+        params['gnn_history_dest'] = f'{checkpoint}/ablation/gnn_history_dest_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_dest'] = f'{checkpoint}/ablation/rnn_history_dest_' + dataset + '_' + exp + '.pt'
+
+        params['gnn_aux'] = f'{checkpoint}/ablation/gnn_aux_' + dataset + '_' + exp + '.pt'
+
+        params['event_network'] = f'{checkpoint}/ablation/event_network' + dataset + '_' + exp + '.pt'
+        params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
+        params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
+
+    else:
+        # FuDGE
+        from model.trainer_remove import Trainer
+        exp = f'fact_{f}_{split}_new'
+        params['exp'] = exp
+
+        params['gnn_history_event'] = f'{checkpoint}/gnn_history_event_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_event'] = f'{checkpoint}/rnn_history_event_' + dataset + '_' + exp + '.pt'
+        params['event_network'] = f'{checkpoint}/event_network' + dataset + '_' + exp + '.pt'
+        params['gnn_history_source'] = f'{checkpoint}/gnn_history_source_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_source'] = f'{checkpoint}/rnn_history_source_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_source'] = f'{checkpoint}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
+        params['net_source'] = f'{checkpoint}/net_source_' + dataset + '_' + exp + '.pt'
+        params['gnn_history_dest'] = f'{checkpoint}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_dest'] = f'{checkpoint}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_dest'] = f'{checkpoint}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
+        params['net_dest'] = f'{checkpoint}/net_dest_' + dataset + '_' + exp + '.pt'
+
     params['plot_title'] = f'{space_plot_losses}/losses_{dataset}_{exp}.pdf'
-
     print('Loading data ...')
     snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set = load_data(params)
 
-    trainer = Trainer(params)
     print('Training ...')
+    trainer = Trainer(params)
     if params['train']:
         trainer.fit(snapshot_train_gen, snapshot_val_gen)
 

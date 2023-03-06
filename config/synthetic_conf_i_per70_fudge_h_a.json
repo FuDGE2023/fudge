@@ -12,15 +12,15 @@
   "folder_generation_graphs": "./generated_graphs",
   "window_size": 30,
   "window_shift": 10,
-  "perc_train": 0.5,
+  "perc_train": 0.7,
   "in_feat": 1,
-  "h_dim_encoder": 32,
-  "z_dim_encoder": 32,
+  "h_dim_encoder": 16,
+  "z_dim_encoder": 16,
   "num_layer_encoder": 3,
-  "h_dim_rnn": 16,
-  "num_layer_rnn": 8,
-  "h_dim_embedding": 32,
-  "h_dim_event": 16,
+  "h_dim_rnn": 8,
+  "num_layer_rnn": 4,
+  "h_dim_embedding": 16,
+  "h_dim_event": 8,
   "out_dim_event": 2,
   "learning_rate": 0.00001,
   "n_epochs": 1,
@@ -31,6 +31,6 @@
   "generate_validation": 1,
   "compute_wl_test": 1,
   "compute_wl_val": 1,
-  "model_name": "fudge"
+  "model_name": "fudge_h_a"
 
 }

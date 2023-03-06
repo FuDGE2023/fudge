@@ -514,27 +514,29 @@ def compute_wl_similarity(params, true_snapshot):
 
 
 def run_generation_synthetic(trainer, params, history, num_generation):
-    trainer.gnn_history_event.load_state_dict(torch.load(params['gnn_history_event']))
-    trainer.rnn_history_event.load_state_dict(torch.load(params['rnn_history_event']))
-    trainer.event.load_state_dict(torch.load(params['event_network']))
 
-    trainer.gnn_history_source.load_state_dict(torch.load(params['gnn_history_source']))
-    trainer.rnn_history_source.load_state_dict(torch.load(params['rnn_history_source']))
+    if params['model_name'] == 'fudge':
+        trainer.gnn_history_event.load_state_dict(torch.load(params['gnn_history_event']))
+        trainer.rnn_history_event.load_state_dict(torch.load(params['rnn_history_event']))
+        trainer.event.load_state_dict(torch.load(params['event_network']))
 
-    trainer.gnn_aux_add_source.load_state_dict(torch.load(params['gnn_aux_add_source']))
-    trainer.net_source.load_state_dict(torch.load(params['net_source']))
+        trainer.gnn_history_source.load_state_dict(torch.load(params['gnn_history_source']))
+        trainer.rnn_history_source.load_state_dict(torch.load(params['rnn_history_source']))
 
-    trainer.gnn_history_dest.load_state_dict(torch.load(params['gnn_history_dest']))
-    trainer.rnn_history_dest.load_state_dict(torch.load(params['rnn_history_dest']))
+        trainer.gnn_aux_add_source.load_state_dict(torch.load(params['gnn_aux_add_source']))
+        trainer.net_source.load_state_dict(torch.load(params['net_source']))
 
-    trainer.gnn_aux_add_dest.load_state_dict(torch.load(params['gnn_aux_add_dest']))
-    trainer.net_dest.load_state_dict(torch.load(params['net_dest']))
+        trainer.gnn_history_dest.load_state_dict(torch.load(params['gnn_history_dest']))
+        trainer.rnn_history_dest.load_state_dict(torch.load(params['rnn_history_dest']))
 
-    models_event = (trainer.gnn_history_event, trainer.rnn_history_event, trainer.event)
-    models_add_source = (trainer.gnn_history_source, trainer.rnn_history_source, trainer.gnn_aux_add_source,
-                         trainer.net_source)
-    models_add_dest = (trainer.gnn_history_dest, trainer.rnn_history_dest, trainer.gnn_aux_add_dest,
-                       trainer.net_dest)
+        trainer.gnn_aux_add_dest.load_state_dict(torch.load(params['gnn_aux_add_dest']))
+        trainer.net_dest.load_state_dict(torch.load(params['net_dest']))
+
+        models_event = (trainer.gnn_history_event, trainer.rnn_history_event, trainer.event)
+        models_add_source = (trainer.gnn_history_source, trainer.rnn_history_source, trainer.gnn_aux_add_source,
+                             trainer.net_source)
+        models_add_dest = (trainer.gnn_history_dest, trainer.rnn_history_dest, trainer.gnn_aux_add_dest,
+                           trainer.net_dest)
 
     generated_snapshot = trainer.generate_graph_rnd_alternative(history, num_generation, models_event,
                                                                 models_add_source, models_add_dest)

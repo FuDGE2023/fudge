@@ -30,6 +30,7 @@
   "generate_test": 1,
   "generate_validation": 1,
   "compute_wl_test": 1,
-  "compute_wl_val": 1
+  "compute_wl_val": 1,
+  "model_name": "fudge"
 
 }
