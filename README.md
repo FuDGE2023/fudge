@@ -33,3 +33,6 @@ main.py module imports the needed libraries and set the environment variable to 
 - [Bitcoin-OTC](https://snap.stanford.edu/data/soc-sign-bitcoin-otc.html)
 - [UCI-Forum](http://konect.cc/networks/opsahl-ucforum/)
 - [EU-Core](https://snap.stanford.edu/data/email-Eu-core-temporal.html)
+- [Synthetic](https://drive.google.com/drive/u/6/folders/1yI1mKnVP_VnXxBPoULlewewbNdz36lm9)
+
+- All datasets must be in a folder named Data.
