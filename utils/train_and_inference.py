@@ -12,17 +12,16 @@ def run_real_world_datasets(params):
     window_size = params['window_size']
     window_shift = params['window_shift']
     perc_train = params['perc_train']
+    bs = params['batch_size']
+    is_sampling = params['is_sampling']
     f = params['f']
     checkpoint = params['checkpoint']
     dataset = params['dataset']
     folder_generation_graphs = params['folder_generation_graphs']
     space_plot_losses = params['space_plot_losses']
 
-    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
-    exp = f'fact_{f}_{split}_new'
-
-    params['out_dim_encoder'] = params['z_dim_encoder'] + (params['num_layer_encoder'] - 1) * params[
-        'h_dim_encoder']
+    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_bs_{bs}_is_sampling_{is_sampling}'
+    exp = f'fact_{f}_{split}_ICDM2023'
 
     params['exp'] = exp
 
@@ -36,13 +35,13 @@ def run_real_world_datasets(params):
     params['net_dest'] = f'{checkpoint}/net_dest_' + dataset + '_' + exp + '.pt'
     params['plot_title'] = f'{space_plot_losses}/losses_{dataset}_{exp}.pdf'
 
-    snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set = load_data(params)
+    x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set = load_data(params)
 
     trainer = Trainer(params)
     print('Training ...')
 
     if params['train']:
-        trainer.fit(snapshot_train_gen, snapshot_val_gen)
+        trainer.fit(snapshot_train_gen, snapshot_val_gen, x_sequences_train, y_sequences_train, params['is_sampling'])
 
     if params['generate_validation']:
         print('Generate validation set ...')
@@ -89,7 +88,7 @@ def compute_metrics(params):
     exp = f'fact_{f}_{split}_new'
     params['exp'] = exp
 
-    _, _, _, test_set, val_set = load_data(params)
+    _, _, _, _, _, test_set, val_set = load_data(params)
 
     if params['compute_wl_val']:
         print('Compute WL similarity on validation set ...')
@@ -130,17 +129,19 @@ def compute_metrics_synthetic(params):
     window_size = params['window_size']
     window_shift = params['window_shift']
     perc_train = params['perc_train']
+    bs = params['batch_size']
+    is_sampling = params['is_sampling']
     f = params['f']
     dataset = params['dataset']
     folder_generation_graphs = params['folder_generation_graphs']
     space_wl_results = params['space_wl_results']
 
-    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
-    exp = f'fact_{f}_{split}_new'
+    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_bs_{bs}_is_sampling_{is_sampling}'
+    exp = f'fact_{f}_{split}_ICDM2023'
     params['exp'] = exp
 
     print('Loading data ...')
-    _, _, _, test_set, val_set = load_data(params)
+    _, _, _, _, _, test_set, val_set = load_data(params)
 
     if params['compute_wl_val']:
         print('Compute WL similarity on validation set ...')
@@ -258,32 +259,19 @@ def run_synthetic_data(params):
     window_size = params['window_size']
     window_shift = params['window_shift']
     perc_train = params['perc_train']
+    bs = params['batch_size']
+    is_sampling = params['is_sampling']
     f = params['f']
     checkpoint = params['checkpoint']
     dataset = params['dataset']
     folder_generation_graphs = params['folder_generation_graphs']
     space_plot_losses = params['space_plot_losses']
 
-    params['out_dim_encoder'] = params['z_dim_encoder'] + (params['num_layer_encoder'] - 1) * params[
-        'h_dim_encoder']
+    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_bs_{bs}_is_sampling_{is_sampling}'
 
-    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
-
-    if params['model_name'] == 'fudge_h_a':
+    if params['model_name'] == 'fudge_h_2a':
         from model.trainer_remove_ablation1 import Trainer
         exp = f'fact_{f}_{split}_ablation1'
-        params['exp'] = exp
-
-        params['gnn_history'] = f'{checkpoint}/ablation/gnn_history_' + dataset + '_' + exp + '.pt'
-        params['rnn_history'] = f'{checkpoint}/ablation/rnn_history_' + dataset + '_' + exp + '.pt'
-        params['gnn_aux'] = f'{checkpoint}/ablation/gnn_aux_' + dataset + '_' + exp + '.pt'
-
-        params['event_network'] = f'{checkpoint}/ablation/event_network' + dataset + '_' + exp + '.pt'
-        params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
-        params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
-    elif params['model_name'] == 'fudge_h_2a':
-        from model.trainer_remove_ablation2 import Trainer
-        exp = f'fact_{f}_{split}_ablation2'
         params['exp'] = exp
 
         params['gnn_history'] = f'{checkpoint}/ablation/gnn_history_' + dataset + '_' + exp + '.pt'
@@ -295,30 +283,10 @@ def run_synthetic_data(params):
         params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
         params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
 
-    elif params['model_name'] == 'fudge_3h_a':
-        from model.trainer_remove_ablation3 import Trainer
-        exp = f'fact_{f}_{split}_ablation3'
-        params['exp'] = exp
-
-        params['gnn_history_event'] = f'{checkpoint}/ablation/gnn_history_event_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_event'] = f'{checkpoint}/ablation/rnn_history_event_' + dataset + '_' + exp + '.pt'
-
-        params['gnn_history_source'] = f'{checkpoint}/ablation/gnn_history_source_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_source'] = f'{checkpoint}/ablation/rnn_history_source_' + dataset + '_' + exp + '.pt'
-
-        params['gnn_history_dest'] = f'{checkpoint}/ablation/gnn_history_dest_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_dest'] = f'{checkpoint}/ablation/rnn_history_dest_' + dataset + '_' + exp + '.pt'
-
-        params['gnn_aux'] = f'{checkpoint}/ablation/gnn_aux_' + dataset + '_' + exp + '.pt'
-
-        params['event_network'] = f'{checkpoint}/ablation/event_network' + dataset + '_' + exp + '.pt'
-        params['net_source'] = f'{checkpoint}/ablation/net_source_' + dataset + '_' + exp + '.pt'
-        params['net_dest'] = f'{checkpoint}/ablation/net_dest_' + dataset + '_' + exp + '.pt'
-
     else:
         # FuDGE
         from model.trainer_remove import Trainer
-        exp = f'fact_{f}_{split}_new'
+        exp = f'fact_{f}_{split}_ICDM2023'
         params['exp'] = exp
 
         params['gnn_history_event'] = f'{checkpoint}/gnn_history_event_' + dataset + '_' + exp + '.pt'
@@ -335,12 +303,12 @@ def run_synthetic_data(params):
 
     params['plot_title'] = f'{space_plot_losses}/losses_{dataset}_{exp}.pdf'
     print('Loading data ...')
-    snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set = load_data(params)
+    x_sequences_train, y_sequences_train, snapshot_train, snapshot_val, snapshot_test, train_set, val_set, test_set = load_data(params)
 
     print('Training ...')
     trainer = Trainer(params)
     if params['train']:
-        trainer.fit(snapshot_train_gen, snapshot_val_gen)
+        trainer.fit(snapshot_train, snapshot_val, x_sequences_train, y_sequences_train, params['is_sampling'])
 
     if params['generate_validation']:
         print('Generate validation set ...')

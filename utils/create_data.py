@@ -1,16 +1,18 @@
 import torch
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
 
 from tqdm import tqdm
 import pandas as pd
 
-from utils.utils import create_graph_star, create_graph_star_two_nodes
+from utils.utils import create_sequences, create_loader
 import numpy as np
+import random
 
 
 def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_data=True, path_generation=None,
-                                     path_regression=None, perc_train=0.7):
+                                     path_regression=None, perc_train=0.7, batch_size=32, seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
 
     def create_mapping(df):
         timestamp = sorted(df['timestamp'].unique())
@@ -111,32 +113,6 @@ def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_da
 
         return snap_generation, snap_regression
 
-    def create_sequences(data, window_size, window_shift, starting_point=0):
-        x_sequences = []
-        y_sequences = []
-
-        idxs = range(starting_point, len(data) - window_size, window_shift)
-
-        for idx in tqdm(idxs):
-            x_sequences.append(data[idx:idx + window_size])
-            y_sequences.append(data[idx + window_size])
-
-        return x_sequences, y_sequences
-
-    def create_loader(x_seq, y_seq, window_size):
-        snapshot = []
-
-        for idx, history in tqdm(enumerate(x_seq)):
-            next_graph = y_seq[idx]
-            last_graph = history[-1]
-            last_graph_star = create_graph_star(last_graph.clone())
-            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
-
-            loader = DataLoader(history, batch_size=window_size)
-            snapshot.append([loader, next_graph, last_graph, last_graph_star, last_graph_star_two])
-
-        return snapshot
-
     if is_data:
         df = pd.read_csv(file_name, header=None, names=['source', 'dest', 'rating', 'timestamp'])
         print(df.head())
@@ -168,7 +144,7 @@ def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_da
         n_operations = d.n_operation
         train_size_regression += n_operations
 
-    val_size_regression = train_size_regression
+    val_size_regression = 0
     for d in val_set_reg:
         n_operations = d.n_operation
         val_size_regression += n_operations
@@ -181,18 +157,33 @@ def create_data_bitcoin_edge_weights(file_name, window_size, window_shift, is_da
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
     x_sequences_test, y_sequences_test = create_sequences(test_set_gen, window_size, window_shift)
 
-    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
+
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
+
+    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size)
+    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size)
+    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size)
 
     print('Last train gen: ', train_set_gen[-1])
     print('Last train reg: ', train_set_reg[-1])
 
-    return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, \
+           train_set_reg, test_set_reg, val_set_reg, train_set_gen, test_set_gen, val_set_gen
 
 
 def create_data_eu_core_no_dupl(file_name, window_size, window_shift, is_data=True, path_generation=None,
-                                path_regression=None, perc_train=0.7):
+                        path_regression=None, learning='generation', test=False, perc_train=0.7, batch_size=32, seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+
     def create_mapping(df):
         timestamp = sorted(df['timestamp'].unique())
         node_mappings = {}
@@ -296,31 +287,6 @@ def create_data_eu_core_no_dupl(file_name, window_size, window_shift, is_data=Tr
 
         return snap_generation, snap_regression
 
-    def create_sequences(data, window_size, window_shift, starting_point=0):
-        x_sequences = []
-        y_sequences = []
-
-        idxs = range(starting_point, len(data) - window_size, window_shift)
-
-        for idx in tqdm(idxs):
-            x_sequences.append(data[idx:idx + window_size])
-            y_sequences.append(data[idx + window_size])
-
-        return x_sequences, y_sequences
-
-    def create_loader(x_seq, y_seq, window_size):
-        snapshot = []
-
-        for idx, history in tqdm(enumerate(x_seq)):
-            next_graph = y_seq[idx]
-            last_graph = history[-1]
-            last_graph_star = create_graph_star(last_graph.clone())
-            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
-
-            loader = DataLoader(history, batch_size=window_size)
-            snapshot.append([loader, next_graph, last_graph, last_graph_star, last_graph_star_two])
-
-        return snapshot
 
     if is_data:
         df = pd.read_csv(file_name, header=None, names=['source', 'dest', 'timestamp'], sep=' ')
@@ -328,7 +294,7 @@ def create_data_eu_core_no_dupl(file_name, window_size, window_shift, is_data=Tr
         node_mappings = create_mapping(df)
         snapshot = create_snap(df, node_mappings)
         snap_generation, snap_regression = create_data(snapshot)
-        torch.save(snap_generation, path_generation)
+        # torch.save(snap_generation, path_generation)
         torch.save(snap_regression, path_regression)
 
     else:
@@ -351,7 +317,7 @@ def create_data_eu_core_no_dupl(file_name, window_size, window_shift, is_data=Tr
         n_operations = d.n_operation
         train_size_regression += n_operations
 
-    val_size_regression = train_size_regression
+    val_size_regression = 0
     for d in val_set_reg:
         n_operations = d.n_operation
         val_size_regression += n_operations
@@ -360,22 +326,42 @@ def create_data_eu_core_no_dupl(file_name, window_size, window_shift, is_data=Tr
     val_set_gen = snap_generation[train_size_regression:train_size_regression + val_size_regression]
     test_set_gen = snap_generation[train_size_regression + val_size_regression:]
 
+    print(len(train_set_gen))
+
     x_sequences_train, y_sequences_train = create_sequences(train_set_gen, window_size, window_shift)
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
     x_sequences_test, y_sequences_test = create_sequences(test_set_gen, window_size, window_shift)
 
-    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
+    print(len(x_sequences_train))
+
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
+
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
+
+    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size)
+    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size)
+    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size)
 
     print('Last train gen: ', train_set_gen[-1])
     print('Last train reg: ', train_set_reg[-1])
 
-    return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
+    print(len(snapshot_train_gen))
+
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg, train_set_gen, test_set_gen, val_set_gen
 
 
 def create_data_uci_forum(file_name, window_size, window_shift, is_data=True, path_generation=None,
-                          path_regression=None, perc_train=0.7):
+                          path_regression=None, perc_train=0.7, test=False, batch_size=32, seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+
     def create_mapping(df):
         timestamp = sorted(df['timestamp'].unique())
         node_mappings = {}
@@ -478,39 +464,13 @@ def create_data_uci_forum(file_name, window_size, window_shift, is_data=True, pa
 
         return snap_generation, snap_regression
 
-    def create_sequences(data, window_size, window_shift, starting_point=0):
-        x_sequences = []
-        y_sequences = []
-
-        idxs = range(starting_point, len(data) - window_size, window_shift)
-
-        for idx in tqdm(idxs):
-            x_sequences.append(data[idx:idx + window_size])
-            y_sequences.append(data[idx + window_size])
-
-        return x_sequences, y_sequences
-
-    def create_loader(x_seq, y_seq, window_size):
-        snapshot = []
-
-        for idx, history in tqdm(enumerate(x_seq)):
-            next_graph = y_seq[idx]
-            last_graph = history[-1]
-            last_graph_star = create_graph_star(last_graph.clone())
-            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
-
-            loader = DataLoader(history, batch_size=window_size)
-            snapshot.append([loader, next_graph, last_graph, last_graph_star, last_graph_star_two])
-
-        return snapshot
-
     if is_data:
         df = pd.read_csv(file_name, header=None, names=['source', 'dest', 'edge_attr', 'timestamp'], sep=' ')
         print(df.head())
         node_mappings = create_mapping(df)
         snapshot = create_snap(df, node_mappings)
         snap_generation, snap_regression = create_data(snapshot)
-        torch.save(snap_generation, path_generation)
+        # torch.save(snap_generation, path_generation)
         torch.save(snap_regression, path_regression)
 
     else:
@@ -534,7 +494,7 @@ def create_data_uci_forum(file_name, window_size, window_shift, is_data=True, pa
         n_operations = d.n_operation
         train_size_regression += n_operations
 
-    val_size_regression = train_size_regression
+    val_size_regression = 0
     for d in val_set_reg:
         n_operations = d.n_operation
         val_size_regression += n_operations
@@ -547,18 +507,32 @@ def create_data_uci_forum(file_name, window_size, window_shift, is_data=True, pa
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
     x_sequences_test, y_sequences_test = create_sequences(test_set_gen, window_size, window_shift)
 
-    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
+
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
+
+    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size)
+    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size)
+    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size)
 
     print('Last train gen: ', train_set_gen[-1])
     print('Last train reg: ', train_set_reg[-1])
 
-    return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg, train_set_gen, test_set_gen, val_set_gen
 
 
 def create_data_bitcoin(file_name, window_size, window_shift, is_data=True, path_generation=None,
-                        path_regression=None, perc_train=0.7, features=False):
+                        path_regression=None, perc_train=0.7, features=False, batch_size=32, seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+
     def create_mapping(df):
         timestamp = sorted(df['timestamp'].unique())
         node_mappings = {}
@@ -664,32 +638,6 @@ def create_data_bitcoin(file_name, window_size, window_shift, is_data=True, path
             snap_regression.append(snap[-1])
 
         return snap_generation, snap_regression
-
-    def create_sequences(data, window_size, window_shift, starting_point=0):
-        x_sequences = []
-        y_sequences = []
-
-        idxs = range(starting_point, len(data) - window_size, window_shift)
-
-        for idx in tqdm(idxs):
-            x_sequences.append(data[idx:idx + window_size])
-            y_sequences.append(data[idx + window_size])
-
-        return x_sequences, y_sequences
-
-    def create_loader(x_seq, y_seq, window_size):
-        snapshot = []
-
-        for idx, history in tqdm(enumerate(x_seq)):
-            next_graph = y_seq[idx]
-            last_graph = history[-1]
-            last_graph_star = create_graph_star(last_graph.clone())
-            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
-
-            loader = DataLoader(history, batch_size=window_size)
-            snapshot.append([loader, next_graph, last_graph, last_graph_star, last_graph_star_two])
-
-        return snapshot
 
     if is_data:
         df = pd.read_csv(file_name, header=None, names=['source', 'dest', 'rating', 'timestamp'])
@@ -706,40 +654,61 @@ def create_data_bitcoin(file_name, window_size, window_shift, is_data=True, path
 
     print('Generation ...')
 
-    amount = len(snap_generation)
+    amount = len(snap_regression)
     perc_val_test = (1 - perc_train) / 2
-
     train_size = int(amount * perc_train)
     val_size = int(amount * perc_val_test)
 
-    train_set_gen = snap_generation[0:train_size]
-    val_set_gen = snap_generation[train_size: train_size + val_size]
-    test_set_gen = snap_generation[train_size + val_size:]
+    train_set_reg = snap_regression[0:train_size]
+    val_set_reg = snap_regression[train_size:train_size + val_size]
+    test_set_reg = snap_regression[train_size + val_size:]
+
+    ####
+
+    train_size_regression = 0
+    for d in train_set_reg:
+        n_operations = d.n_operation
+        train_size_regression += n_operations
+
+    val_size_regression = 0
+    for d in val_set_reg:
+        n_operations = d.n_operation
+        val_size_regression += n_operations
+
+    train_set_gen = snap_generation[0:train_size_regression]
+    val_set_gen = snap_generation[train_size_regression:train_size_regression + val_size_regression]
+    test_set_gen = snap_generation[train_size_regression + val_size_regression:]
 
     x_sequences_train, y_sequences_train = create_sequences(train_set_gen, window_size, window_shift)
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
     x_sequences_test, y_sequences_test = create_sequences(test_set_gen, window_size, window_shift)
 
-    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
 
-    amount = len(snap_regression)
-    train_size = int(amount * perc_train)
-    val_size = int(amount * perc_val_test)
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
 
-    train_set_reg = snap_regression[0:train_size]
-    val_set_reg = snap_regression[train_size: train_size + val_size]
-    test_set_reg = snap_regression[train_size + val_size:]
+    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size)
+    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size)
+    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size)
 
     print('Last train gen: ', train_set_gen[-1])
     print('Last train reg: ', train_set_reg[-1])
 
-    return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg, train_set_gen, test_set_gen, val_set_gen
 
 
 def create_data_bitcoin_alpha(file_name, window_size, window_shift, is_data=True, path_generation=None,
-                              path_regression=None, perc_train=0.7, features=False):
+                        path_regression=None, perc_train=0.7, features=False, batch_size=32, seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+
     def create_mapping(df):
         timestamp = sorted(df['timestamp'].unique())
         node_mappings = {}
@@ -845,32 +814,6 @@ def create_data_bitcoin_alpha(file_name, window_size, window_shift, is_data=True
             snap_regression.append(snap[-1])
 
         return snap_generation, snap_regression
-
-    def create_sequences(data, window_size, window_shift, starting_point=0):
-        x_sequences = []
-        y_sequences = []
-
-        idxs = range(starting_point, len(data) - window_size, window_shift)
-
-        for idx in tqdm(idxs):
-            x_sequences.append(data[idx:idx + window_size])
-            y_sequences.append(data[idx + window_size])
-
-        return x_sequences, y_sequences
-
-    def create_loader(x_seq, y_seq, window_size):
-        snapshot = []
-
-        for idx, history in tqdm(enumerate(x_seq)):
-            next_graph = y_seq[idx]
-            last_graph = history[-1]
-            last_graph_star = create_graph_star(last_graph.clone())
-            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
-
-            loader = DataLoader(history, batch_size=window_size)
-            snapshot.append([loader, next_graph, last_graph, last_graph_star, last_graph_star_two])
-
-        return snapshot
 
     if is_data:
         df = pd.read_csv(file_name, header=None, names=['source', 'dest', 'rating', 'timestamp'])
@@ -904,7 +847,7 @@ def create_data_bitcoin_alpha(file_name, window_size, window_shift, is_data=True
         n_operations = d.n_operation
         train_size_regression += n_operations
 
-    val_size_regression = train_size_regression
+    val_size_regression = 0
     for d in val_set_reg:
         n_operations = d.n_operation
         val_size_regression += n_operations
@@ -917,11 +860,71 @@ def create_data_bitcoin_alpha(file_name, window_size, window_shift, is_data=True
     x_sequences_val, y_sequences_val = create_sequences(val_set_gen, window_size, window_shift)
     x_sequences_test, y_sequences_test = create_sequences(test_set_gen, window_size, window_shift)
 
-    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size)
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
+
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
+
+    snapshot_train_gen = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size)
+    snapshot_val_gen = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size)
+    snapshot_test_gen = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size)
 
     print('Last train gen: ', train_set_gen[-1])
     print('Last train reg: ', train_set_reg[-1])
 
-    return snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_test_gen, snapshot_val_gen, train_set_reg, test_set_reg, val_set_reg, train_set_gen, test_set_gen, val_set_gen
+
+
+def load_synthetic(params, seed=42):
+    from utils.utils import loadList
+
+    random.seed(seed)
+    np.random.seed(seed)
+
+    dataset_path = params['dataset_path']
+    snap = loadList(dataset_path)
+
+    window_size = params['window_size']
+    window_shift = params['window_shift']
+    perc_train = params['perc_train']
+    batch_size = params['batch_size']
+    print(f'batch_size: {batch_size}')
+
+    amount = len(snap)
+    perc_val_test = (1. - perc_train) / 2
+
+    print(f'% train: {perc_train}, % val: {perc_val_test}')
+
+    train_size = int(amount * perc_train)
+    val_size = int(amount * perc_val_test)
+
+    train_set = snap[0:train_size]
+    val_set = snap[train_size:train_size + val_size]
+    test_set = snap[train_size + val_size:]
+
+    x_sequences_train, y_sequences_train = create_sequences(train_set, window_size, window_shift)
+    x_sequences_val, y_sequences_val = create_sequences(val_set, window_size, window_shift)
+    x_sequences_test, y_sequences_test = create_sequences(test_set, window_size, window_shift)
+
+    # Shuffle for batch
+    temp = list(zip(x_sequences_train, y_sequences_train))
+    random.shuffle(temp)
+    x_sequences_train, y_sequences_train = zip(*temp)
+    x_sequences_train, y_sequences_train = list(x_sequences_train), list(y_sequences_train)
+
+    temp = list(zip(x_sequences_val, y_sequences_val))
+    random.shuffle(temp)
+    x_sequences_val, y_sequences_val = zip(*temp)
+    x_sequences_val, y_sequences_val = list(x_sequences_val), list(y_sequences_val)
+
+    snapshot_train = create_loader(x_sequences_train, y_sequences_train, window_size, batch_size, is_synthetic=True)
+    snapshot_val = create_loader(x_sequences_val, y_sequences_val, window_size, batch_size, is_synthetic=True)
+    snapshot_test = create_loader(x_sequences_test, y_sequences_test, window_size, batch_size, is_synthetic=True)
+
+    return x_sequences_train, y_sequences_train, snapshot_train, snapshot_val, snapshot_test, train_set, val_set, test_set

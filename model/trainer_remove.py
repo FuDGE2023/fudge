@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch_geometric.utils import to_networkx, from_networkx
 
 from model.model import EncoderGIN, RecurrentNetwork, netEmbedding, ProbabilityEventNetwork
-from utils.utils import create_graph_star
+from utils.utils import create_graph_star, create_dynamic_loader, create_graph_star_two_nodes
 
 from time import time
 import matplotlib.pyplot as plt
@@ -46,10 +46,13 @@ class Trainer(nn.Module):
         self.in_feat = self.params['in_feat']
         self.h_dim_encoder = self.params['h_dim_encoder']
         self.z_dim_encoder = self.params['z_dim_encoder']
-        self.num_layer_encoder = self.params['num_layer_encoder']
-        self.out_dim_encoder = self.params['out_dim_encoder']
-        self.learning_rate = self.params['learning_rate']
+
+        self.learning_rate_event = self.params['learning_rate_event']
+        self.learning_rate_source = self.params['learning_rate_source']
+        self.learning_rate_dest = self.params['learning_rate_dest']
+
         self.window_size = self.params['window_size']
+        self.batch_size = self.params['batch_size']
 
         self.h_dim_rnn = self.params['h_dim_rnn']
         self.num_layer_rnn = self.params['num_layer_rnn']
@@ -65,10 +68,11 @@ class Trainer(nn.Module):
         self.event = ProbabilityEventNetwork(self.num_layer_rnn * self.h_dim_rnn, self.h_dim_event,
                                              self.out_dim_event).to(self.device)
 
-        self.optim_gnn_history_event = torch.optim.Adam(self.gnn_history_event.parameters(), lr=self.learning_rate)
-        self.optim_rnn_history_event = torch.optim.Adam(self.rnn_history_event.parameters(), lr=self.learning_rate)
-
-        self.optim_event = torch.optim.Adam(self.event.parameters(), lr=self.learning_rate)
+        self.optim_gnn_history_event = torch.optim.Adam(self.gnn_history_event.parameters(),
+                                                        lr=self.learning_rate_event)
+        self.optim_rnn_history_event = torch.optim.Adam(self.rnn_history_event.parameters(),
+                                                        lr=self.learning_rate_event)
+        self.optim_event = torch.optim.Adam(self.event.parameters(), lr=self.learning_rate_event)
 
         # Init model add source
         self.gnn_history_source = EncoderGIN(self.in_feat, self.h_dim_encoder, self.z_dim_encoder).to(self.device)
@@ -79,11 +83,14 @@ class Trainer(nn.Module):
         self.net_source = netEmbedding(self.num_layer_rnn * self.h_dim_rnn, self.h_dim_embedding,
                                        self.z_dim_encoder).to(self.device)
 
-        self.optim_gnn_history_source = torch.optim.Adam(self.gnn_history_source.parameters(), lr=self.learning_rate)
-        self.optim_rnn_history_source = torch.optim.Adam(self.rnn_history_source.parameters(), lr=self.learning_rate)
+        self.optim_gnn_history_source = torch.optim.Adam(self.gnn_history_source.parameters(),
+                                                         lr=self.learning_rate_source)
+        self.optim_rnn_history_source = torch.optim.Adam(self.rnn_history_source.parameters(),
+                                                         lr=self.learning_rate_source)
 
-        self.optim_gnn_aux_add_source = torch.optim.Adam(self.gnn_aux_add_source.parameters(), lr=self.learning_rate)
-        self.optim_net_source = torch.optim.Adam(self.net_source.parameters(), lr=self.learning_rate)
+        self.optim_gnn_aux_add_source = torch.optim.Adam(self.gnn_aux_add_source.parameters(),
+                                                         lr=self.learning_rate_source)
+        self.optim_net_source = torch.optim.Adam(self.net_source.parameters(), lr=self.learning_rate_source)
 
         # Init model add dest
         self.gnn_history_dest = EncoderGIN(self.in_feat, self.h_dim_encoder, self.z_dim_encoder).to(self.device)
@@ -93,17 +100,18 @@ class Trainer(nn.Module):
         self.net_dest = netEmbedding(self.num_layer_rnn * self.h_dim_rnn + self.z_dim_encoder, self.h_dim_embedding,
                                      self.z_dim_encoder).to(self.device)
 
-        self.optim_gnn_history_dest = torch.optim.Adam(self.gnn_history_dest.parameters(), lr=self.learning_rate)
-        self.optim_rnn_history_dest = torch.optim.Adam(self.rnn_history_dest.parameters(), lr=self.learning_rate)
-        self.optim_gnn_aux_add_dest = torch.optim.Adam(self.gnn_aux_add_dest.parameters(), lr=self.learning_rate)
-        self.optim_net_dest = torch.optim.Adam(self.net_dest.parameters(), lr=self.learning_rate)
+        self.optim_gnn_history_dest = torch.optim.Adam(self.gnn_history_dest.parameters(), lr=self.learning_rate_dest)
+        self.optim_rnn_history_dest = torch.optim.Adam(self.rnn_history_dest.parameters(), lr=self.learning_rate_dest)
+        self.optim_gnn_aux_add_dest = torch.optim.Adam(self.gnn_aux_add_dest.parameters(), lr=self.learning_rate_dest)
+        self.optim_net_dest = torch.optim.Adam(self.net_dest.parameters(), lr=self.learning_rate_dest)
 
         self.cel = nn.CrossEntropyLoss(reduction='mean')
-        self.cosine_similarity = nn.CosineSimilarity()
+        self.print_n_params()
+
+        self.scaler = torch.cuda.amp.GradScaler()
 
     def train_event(self, snapshot_train):
         start_train_event = time()
-
         self.gnn_history_event.train()
         self.rnn_history_event.train()
         self.event.train()
@@ -117,77 +125,40 @@ class Trainer(nn.Module):
             self.optim_event.zero_grad()
 
             loader = snapshot_seq[0]
-            next_graph = snapshot_seq[1]
 
-            f_tot = None
-            for _time, snapshot in enumerate(loader):
-                edge_index = snapshot.edge_index.to(self.device)
-                x = snapshot.x.to(self.device)
-                edge_index_t = snapshot.edge_index_t.to(self.device)
-                batch = snapshot.batch.to(self.device)
+            y_event = snapshot_seq[10]
+            y_event = y_event.to(self.device)
 
+            it_loader = iter(loader)
+            snapshot = next(it_loader)
+            edge_index = snapshot.edge_index.to(self.device)
+            x = snapshot.x.to(self.device).to(torch.float16)
+            edge_index_t = snapshot.edge_index_t.to(self.device)
+            batch = snapshot.batch.to(self.device)
+
+            with torch.cuda.amp.autocast(dtype=torch.float16):
                 f_tot, _ = self.gnn_history_event(edge_index, x, edge_index_t, batch)
 
-            _, h_t = self.rnn_history_event(f_tot)
-            h_t = h_t.flatten()
-            h_t = h_t.reshape(1, h_t.shape[0])
-
-            p_event = self.event(h_t)
-            y_event = next_graph[8].to(self.device)
-
-            loss_event = self.cel(p_event, y_event)
-            loss_event.backward()
-
-            self.optim_gnn_history_event.step()
-            self.optim_rnn_history_event.step()
-            self.optim_event.step()
-
-            loss_event_batch += loss_event.item()
-
-        idx = (idx + 1)
-        loss_event_batch /= idx
-
-        end_train_event = time()
-
-        print(
-            f'loss event: {loss_event_batch:.4f}')
-        print(f'Elapsed time: {end_train_event - start_train_event}')
-
-        return loss_event_batch
-
-    def val_event(self, snapshot_test):
-        start_train_event = time()
-
-        self.gnn_history_event.eval()
-        self.rnn_history_event.eval()
-        self.event.eval()
-
-        loss_event_batch = 0
-        idx = 0
-
-        with torch.no_grad():
-            for idx, snapshot_seq in tqdm(enumerate(snapshot_test), total=len(snapshot_test)):
-                loader = snapshot_seq[0]
-                next_graph = snapshot_seq[1]
-
-                f_tot = None
-                for _time, snapshot in enumerate(loader):
-                    edge_index = snapshot.edge_index.to(self.device)
-                    x = snapshot.x.to(self.device)
-                    edge_index_t = snapshot.edge_index_t.to(self.device)
-                    batch = snapshot.batch.to(self.device)
-
-                    f_tot, _ = self.gnn_history_event(edge_index, x, edge_index_t, batch)
+                bs_tmp = f_tot.shape[0] // self.window_size
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
 
                 _, h_t = self.rnn_history_event(f_tot)
-                h_t = h_t.flatten()
-                h_t = h_t.reshape(1, h_t.shape[0])
+
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
 
                 p_event = self.event(h_t)
-                y_event = next_graph[8].to(self.device)
 
                 loss_event = self.cel(p_event, y_event)
-                loss_event_batch += loss_event.item()
+
+            self.scaler.scale(loss_event).backward()
+            loss_event_batch += loss_event.item()
+
+            self.scaler.step(self.optim_gnn_history_event)
+            self.scaler.step(self.optim_rnn_history_event)
+            self.scaler.step(self.optim_event)
+
+            self.scaler.update()
 
         idx = (idx + 1)
         loss_event_batch /= idx
@@ -218,100 +189,60 @@ class Trainer(nn.Module):
             self.optim_net_source.zero_grad()
 
             loader = snapshot_seq[0]
-            next_graph = snapshot_seq[1]
-            last_graph_star = snapshot_seq[3]
+            loader_last_graphs_star = snapshot_seq[3]
+            n_nodes_last_graphs_star = snapshot_seq[5]
 
-            f_tot = None
-            for _time, snapshot in enumerate(loader):
-                edge_index = snapshot.edge_index.to(self.device)
-                x = snapshot.x.to(self.device)
-                edge_index_t = snapshot.edge_index_t.to(self.device)
-                batch = snapshot.batch.to(self.device)
+            y_sources = snapshot_seq[7]
 
+            it_loader = iter(loader)
+            snapshot = next(it_loader)
+            edge_index = snapshot.edge_index.to(self.device)
+            x = snapshot.x.to(self.device).to(torch.float16)
+            edge_index_t = snapshot.edge_index_t.to(self.device)
+            batch = snapshot.batch.to(self.device)
+            y_sources = y_sources.to(self.device).to(torch.float16)
+
+            with torch.cuda.amp.autocast(dtype=torch.float16):
                 f_tot, _ = self.gnn_history_source(edge_index, x, edge_index_t, batch)
 
-            _, h_t = self.rnn_history_source(f_tot)
-            h_t = h_t.flatten()
-            h_t = h_t.reshape(1, h_t.shape[0])
-
-            edge_index = last_graph_star.edge_index.to(self.device)
-            x = last_graph_star.x.to(self.device)
-            edge_index_t = last_graph_star.edge_index_t.to(self.device)
-
-            h_last, z_last = self.gnn_aux_add_source(edge_index, x, edge_index_t)
-            z_source = self.net_source(h_t)
-            logit_source = torch.mm(z_last, z_source.T).flatten()
-
-            y_source = torch.zeros_like(logit_source)
-            y_source[next_graph[2]] = 1
-            y_source = y_source.to(self.device)
-
-            loss_source = self.cel(logit_source, y_source)
-            loss_source.backward()
-
-            self.optim_gnn_history_source.step()
-            self.optim_rnn_history_source.step()
-
-            self.optim_gnn_aux_add_source.step()
-            self.optim_net_source.step()
-
-            loss_source_batch += loss_source.item()
-
-        idx = (idx + 1)
-        loss_source_batch /= idx
-
-        end_train_add_source = time()
-
-        print(
-            f'loss source: {loss_source_batch:.4f}')
-        print(f'Elapsed time: {end_train_add_source - start_train_add_source}')
-
-        return loss_source_batch
-
-    def val_add_source(self, snapshot_test):
-        start_train_add_source = time()
-        self.gnn_history_source.eval()
-        self.rnn_history_source.eval()
-        self.gnn_aux_add_source.eval()
-        self.net_source.eval()
-
-        loss_source_batch = 0
-        idx = 0
-
-        with torch.no_grad():
-            for idx, snapshot_seq in tqdm(enumerate(snapshot_test), total=len(snapshot_test)):
-
-                loader = snapshot_seq[0]
-                next_graph = snapshot_seq[1]
-                last_graph_star = snapshot_seq[3]
-
-                f_tot = None
-                for _time, snapshot in enumerate(loader):
-                    edge_index = snapshot.edge_index.to(self.device)
-                    x = snapshot.x.to(self.device)
-                    edge_index_t = snapshot.edge_index_t.to(self.device)
-                    batch = snapshot.batch.to(self.device)
-
-                    f_tot, _ = self.gnn_history_source(edge_index, x, edge_index_t, batch)
+                bs_tmp = f_tot.shape[0] // self.window_size
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
 
                 _, h_t = self.rnn_history_source(f_tot)
-                h_t = h_t.flatten()
-                h_t = h_t.reshape(1, h_t.shape[0])
 
-                edge_index = last_graph_star.edge_index.to(self.device)
-                x = last_graph_star.x.to(self.device)
-                edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
 
-                h_last, z_last = self.gnn_aux_add_source(edge_index, x, edge_index_t)
                 z_source = self.net_source(h_t)
-                logit_source = torch.mm(z_last, z_source.T).flatten()
 
-                y_source = torch.zeros_like(logit_source)
-                y_source[next_graph[2]] = 1
-                y_source = y_source.to(self.device)
+                it_loader = iter(loader_last_graphs_star)
+                last_graphs_star = next(it_loader)
 
-                loss_source = self.cel(logit_source, y_source)
-                loss_source_batch += loss_source.item()
+                edge_index = last_graphs_star.edge_index.to(self.device)
+                x = last_graphs_star.x.to(self.device)
+                edge_index_t = last_graphs_star.edge_index_t.to(self.device)
+                batch = last_graphs_star.batch.to(self.device)
+
+                _, z_last = self.gnn_aux_add_source(edge_index, x, edge_index_t, batch)
+
+                max_n = np.max(n_nodes_last_graphs_star)
+                z_last = torch.split(z_last, n_nodes_last_graphs_star)
+                z_last = torch.stack([torch.cat((x, torch.zeros(max_n-x.shape[0], x.shape[1]).to(self.device)),
+                                                dim=0) for x in z_last])
+                z_source = z_source.unsqueeze(1).repeat(1, max_n, 1)
+                logit_source = torch.bmm(z_last, torch.transpose(z_source, 2, 1))
+                logit_source = logit_source[:, :, 0]
+
+                loss_source = self.cel(logit_source, y_sources)
+
+            self.scaler.scale(loss_source).backward()
+            loss_source_batch += loss_source.item()
+
+            self.scaler.step(self.optim_gnn_history_source)
+            self.scaler.step(self.optim_rnn_history_source)
+            self.scaler.step(self.optim_gnn_aux_add_source)
+            self.scaler.step(self.optim_net_source)
+            self.scaler.update()
 
         idx = (idx + 1)
         loss_source_batch /= idx
@@ -344,50 +275,66 @@ class Trainer(nn.Module):
             self.optim_net_dest.zero_grad()
 
             loader = snapshot_seq[0]
-            next_graph = snapshot_seq[1]
-            last_graph_star = snapshot_seq[3]
+            loader_last_graphs_star = snapshot_seq[4]
+            n_nodes_last_graphs_star_two = snapshot_seq[6]
 
-            f_tot = None
-            for _time, snapshot in enumerate(loader):
-                edge_index = snapshot.edge_index.to(self.device)
-                x = snapshot.x.to(self.device)
-                edge_index_t = snapshot.edge_index_t.to(self.device)
-                batch = snapshot.batch.to(self.device)
+            y_destinations = snapshot_seq[8]
+            y_destinations = y_destinations.to(self.device).to(torch.float16)
+
+            source_tmp = snapshot_seq[9]
+
+            it_loader = iter(loader)
+            snapshot = next(it_loader)
+
+            edge_index = snapshot.edge_index.to(self.device)
+            x = snapshot.x.to(self.device).to(torch.float16)
+            edge_index_t = snapshot.edge_index_t.to(self.device)
+            batch = snapshot.batch.to(self.device)
+
+            with torch.cuda.amp.autocast(dtype=torch.float16):
 
                 f_tot, _ = self.gnn_history_dest(edge_index, x, edge_index_t, batch)
 
-            _, h_t = self.rnn_history_dest(f_tot)
-            h_t = h_t.flatten()
-            h_t = h_t.reshape(1, h_t.shape[0])
+                bs_tmp = f_tot.shape[0] // self.window_size
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
 
-            edge_index = last_graph_star.edge_index.to(self.device)
-            x = last_graph_star.x.to(self.device)
-            edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                _, h_t = self.rnn_history_dest(f_tot)
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
 
-            h_last, z_last = self.gnn_aux_add_dest(edge_index, x, edge_index_t)
+                it_loader = iter(loader_last_graphs_star)
+                last_graphs_star = next(it_loader)
+                edge_index = last_graphs_star.edge_index.to(self.device)
+                x = last_graphs_star.x.to(self.device)
+                edge_index_t = last_graphs_star.edge_index_t.to(self.device)
+                batch = last_graphs_star.batch.to(self.device)
 
-            # Find source
-            source = next_graph[6].argmax()
-            z_source = z_last[source].to(self.device)
-            z_source = z_source.reshape(1, z_source.shape[0])
+                _, z_last = self.gnn_aux_add_dest(edge_index, x, edge_index_t, batch)
 
-            z_dest = self.net_dest(torch.cat((h_t, z_source), -1))
-            logit_dest = torch.mm(z_last, z_dest.T).flatten()
+                z_source = z_last[source_tmp].to(self.device)
 
-            y_dest = torch.zeros_like(logit_dest)
-            y_dest[next_graph[3]] = 1
-            y_dest = y_dest.to(self.device)
+                z_dest = self.net_dest(torch.cat((h_t, z_source), -1))
 
-            loss_dest = self.cel(logit_dest, y_dest)
-            loss_dest.backward()
+                max_n = np.max(n_nodes_last_graphs_star_two)
+                z_last = torch.split(z_last, n_nodes_last_graphs_star_two)
+                z_last = torch.stack([torch.cat((x, torch.zeros(max_n - x.shape[0], x.shape[1]).to(self.device)),
+                                                dim=0) for x in z_last])
+                z_dest = z_dest.unsqueeze(1).repeat(1, max_n, 1)
+                logit_dest = torch.bmm(z_last, torch.transpose(z_dest, 2, 1))
+                logit_dest = logit_dest[:, :, 0]
 
-            self.optim_gnn_history_dest.step()
-            self.optim_rnn_history_dest.step()
+                loss_dest = self.cel(logit_dest, y_destinations)
 
-            self.optim_gnn_aux_add_dest.step()
-            self.optim_net_dest.step()
+            self.scaler.scale(loss_dest).backward()
 
             loss_dest_batch += loss_dest.item()
+
+            self.scaler.step(self.optim_gnn_history_dest)
+            self.scaler.step(self.optim_rnn_history_dest)
+            self.scaler.step(self.optim_gnn_aux_add_dest)
+            self.scaler.step(self.optim_net_dest)
+
+            self.scaler.update()
 
         idx = (idx + 1)
         loss_dest_batch /= idx
@@ -400,7 +347,124 @@ class Trainer(nn.Module):
 
         return loss_dest_batch
 
-    def val_add_dest(self, snapshot_test):
+    def val_event(self, snapshot_val):
+        start_train_event = time()
+        self.gnn_history_event.eval()
+        self.rnn_history_event.eval()
+        self.event.eval()
+
+        loss_event_batch = 0
+        idx = 0
+
+        with torch.no_grad():
+            for idx, snapshot_seq in tqdm(enumerate(snapshot_val), total=len(snapshot_val)):
+
+                loader = snapshot_seq[0]
+
+                y_event = snapshot_seq[10]
+                y_event = y_event.to(self.device)
+
+                it_loader = iter(loader)
+                snapshot = next(it_loader)
+                edge_index = snapshot.edge_index.to(self.device)
+                x = snapshot.x.to(self.device)
+                edge_index_t = snapshot.edge_index_t.to(self.device)
+                batch = snapshot.batch.to(self.device)
+
+                f_tot, _ = self.gnn_history_event(edge_index, x, edge_index_t, batch)
+                bs_tmp = f_tot.shape[0] // self.window_size
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
+
+                _, h_t = self.rnn_history_event(f_tot)
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
+
+                p_event = self.event(h_t)
+
+                loss_event = self.cel(p_event, y_event)
+                loss_event_batch += loss_event.item()
+
+        idx = (idx + 1)
+        loss_event_batch /= idx
+
+        end_train_event = time()
+
+        print(
+            f'loss event: {loss_event_batch:.4f}')
+        print(f'Elapsed time: {end_train_event - start_train_event}')
+
+        return loss_event_batch
+
+    def val_add_source(self, snapshot_val):
+        start_train_add_source = time()
+        self.gnn_history_source.eval()
+        self.rnn_history_source.eval()
+        self.gnn_aux_add_source.eval()
+        self.net_source.eval()
+
+        loss_source_batch = 0
+        idx = 0
+
+        with torch.no_grad():
+            for idx, snapshot_seq in tqdm(enumerate(snapshot_val), total=len(snapshot_val)):
+
+                loader = snapshot_seq[0]
+                loader_last_graphs_star = snapshot_seq[3]
+                n_nodes_last_graphs_star = snapshot_seq[5]
+
+                y_sources = snapshot_seq[7]
+                y_sources = y_sources.to(self.device)
+
+                it_loader = iter(loader)
+                snapshot = next(it_loader)
+                edge_index = snapshot.edge_index.to(self.device)
+                x = snapshot.x.to(self.device)
+                edge_index_t = snapshot.edge_index_t.to(self.device)
+                batch = snapshot.batch.to(self.device)
+
+                f_tot, _ = self.gnn_history_source(edge_index, x, edge_index_t, batch)
+                bs_tmp = f_tot.shape[0] // self.window_size
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
+
+                _, h_t = self.rnn_history_source(f_tot)
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
+
+                z_source = self.net_source(h_t)
+
+                it_loader = iter(loader_last_graphs_star)
+                last_graphs_star = next(it_loader)
+
+                edge_index = last_graphs_star.edge_index.to(self.device)
+                x = last_graphs_star.x.to(self.device)
+                edge_index_t = last_graphs_star.edge_index_t.to(self.device)
+                batch = last_graphs_star.batch.to(self.device)
+
+                _, z_last = self.gnn_aux_add_source(edge_index, x, edge_index_t, batch)
+
+                max_n = np.max(n_nodes_last_graphs_star)
+                z_last = torch.split(z_last, n_nodes_last_graphs_star)
+                z_last = torch.stack([torch.cat((x, torch.zeros(max_n - x.shape[0], x.shape[1]).to(self.device)),
+                                                dim=0) for x in z_last])
+                z_source = z_source.unsqueeze(1).repeat(1, max_n, 1)
+                logit_source = torch.bmm(z_last, torch.transpose(z_source, 2, 1))
+                logit_source = logit_source[:, :, 0]
+
+                loss_source = self.cel(logit_source, y_sources)
+                loss_source_batch += loss_source.item()
+
+        idx = (idx + 1)
+        loss_source_batch /= idx
+
+        end_train_add_source = time()
+
+        print(
+            f'loss source: {loss_source_batch:.4f}')
+        print(f'Elapsed time: {end_train_add_source - start_train_add_source}')
+
+        return loss_source_batch
+
+    def val_add_dest(self, snapshot_val):
         start_train_add_dest = time()
 
         self.gnn_history_dest.eval()
@@ -413,44 +477,56 @@ class Trainer(nn.Module):
         idx = 0
 
         with torch.no_grad():
-            for idx, snapshot_seq in tqdm(enumerate(snapshot_test), total=len(snapshot_test)):
+            for idx, snapshot_seq in tqdm(enumerate(snapshot_val), total=len(snapshot_val)):
 
                 loader = snapshot_seq[0]
-                next_graph = snapshot_seq[1]
-                last_graph_star = snapshot_seq[3]
+                loader_last_graphs_star = snapshot_seq[4]
+                n_nodes_last_graphs_star_two = snapshot_seq[6]
 
-                f_tot = None
-                for _time, snapshot in enumerate(loader):
-                    edge_index = snapshot.edge_index.to(self.device)
-                    x = snapshot.x.to(self.device)
-                    edge_index_t = snapshot.edge_index_t.to(self.device)
-                    batch = snapshot.batch.to(self.device)
+                y_destinations = snapshot_seq[8]
+                y_destinations = y_destinations.to(self.device)
 
-                    f_tot, _ = self.gnn_history_dest(edge_index, x, edge_index_t, batch)
+                source_tmp = snapshot_seq[9]
+
+                it_loader = iter(loader)
+                snapshot = next(it_loader)
+
+                edge_index = snapshot.edge_index.to(self.device)
+                x = snapshot.x.to(self.device)
+                edge_index_t = snapshot.edge_index_t.to(self.device)
+                batch = snapshot.batch.to(self.device)
+
+                f_tot, _ = self.gnn_history_dest(edge_index, x, edge_index_t, batch)
+
+                bs_tmp = f_tot.shape[0] // self.window_size
+
+                f_tot = f_tot.reshape(bs_tmp, self.window_size, self.z_dim_encoder)
 
                 _, h_t = self.rnn_history_dest(f_tot)
-                h_t = h_t.flatten()
-                h_t = h_t.reshape(1, h_t.shape[0])
+                h_t = h_t.transpose(0, 1)
+                h_t = h_t.reshape(h_t.shape[0], h_t.shape[1] * h_t.shape[2])
 
-                edge_index = last_graph_star.edge_index.to(self.device)
-                x = last_graph_star.x.to(self.device)
-                edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                it_loader = iter(loader_last_graphs_star)
+                last_graphs_star = next(it_loader)
+                edge_index = last_graphs_star.edge_index.to(self.device)
+                x = last_graphs_star.x.to(self.device)
+                edge_index_t = last_graphs_star.edge_index_t.to(self.device)
+                batch = last_graphs_star.batch.to(self.device)
 
-                h_last, z_last = self.gnn_aux_add_dest(edge_index, x, edge_index_t)
+                _, z_last = self.gnn_aux_add_dest(edge_index, x, edge_index_t, batch)
 
-                # Find source
-                source = next_graph[6].argmax()
-                z_source = z_last[source].to(self.device)
-                z_source = z_source.reshape(1, z_source.shape[0])
+                z_source = z_last[source_tmp].to(self.device)
 
                 z_dest = self.net_dest(torch.cat((h_t, z_source), -1))
-                logit_dest = torch.mm(z_last, z_dest.T).flatten()
+                max_n = np.max(n_nodes_last_graphs_star_two)
+                z_last = torch.split(z_last, n_nodes_last_graphs_star_two)
+                z_last = torch.stack([torch.cat((x, torch.zeros(max_n - x.shape[0], x.shape[1]).to(self.device)),
+                                                dim=0) for x in z_last])
+                z_dest = z_dest.unsqueeze(1).repeat(1, max_n, 1)
+                logit_dest = torch.bmm(z_last, torch.transpose(z_dest, 2, 1))
+                logit_dest = logit_dest[:, :, 0]
 
-                y_dest = torch.zeros_like(logit_dest)
-                y_dest[next_graph[3]] = 1
-                y_dest = y_dest.to(self.device)
-
-                loss_dest = self.cel(logit_dest, y_dest)
+                loss_dest = self.cel(logit_dest, y_destinations)
                 loss_dest_batch += loss_dest.item()
 
         idx = (idx + 1)
@@ -464,17 +540,16 @@ class Trainer(nn.Module):
 
         return loss_dest_batch
 
-    def train_step(self, snapshot_train, snapshot_val):
+    def train_step(self, snapshot_train, snapshot_val, x_seq_train, y_seq_train, is_sampling=False): #
         dataset = self.params['dataset']
         exp = self.params['exp']
-        space_results_losses = self.params['space_results_losses']
 
         best_loss_source = np.inf
         best_loss_dest = np.inf
         best_loss_event = np.inf
 
-        path_losses = f'{space_results_losses}/losses_{dataset}_{exp}.txt'
-        path_val_losses = f'{space_results_losses}/val_losses_{dataset}_{exp}.txt'
+        path_losses = f'./results_losses/losses_{dataset}_{exp}.txt'
+        path_val_losses = f'./results_losses/val_losses_{dataset}_{exp}.txt'
 
         open(path_losses, 'w').close()
         open(path_val_losses, 'w').close()
@@ -483,10 +558,14 @@ class Trainer(nn.Module):
         losses_event_val, losses_source_val, losses_dest_val = [], [], []
 
         try:
+
             for epoch in range(self.params['n_epochs']):
                 print(f'Epoch: {epoch + 1}')
-
                 print('\n Training \n')
+
+                if is_sampling:
+                        snapshot_train = create_dynamic_loader(x_seq_train, y_seq_train, self.params['window_size'],
+                                                               self.params['batch_size'], is_synthetic=True)
 
                 loss_event_batch = self.train_event(snapshot_train)
                 loss_source_batch = self.train_add_source(snapshot_train)
@@ -509,8 +588,7 @@ class Trainer(nn.Module):
                     filehandle.write(f'\n {epoch}, {loss_source_batch}, {loss_dest_batch}, {loss_event_batch} \n')
 
                 with open(path_val_losses, 'a') as filehandle:
-                    filehandle.write(f'\n {epoch}, {val_loss_source_batch}, {val_loss_dest_batch},'
-                                     f' {val_loss_event_batch} \n')
+                    filehandle.write(f'\n {epoch}, {val_loss_source_batch}, {val_loss_dest_batch}, {val_loss_event_batch}  \n')
 
                 if best_loss_event > val_loss_event_batch:
                     best_loss_event = val_loss_event_batch
@@ -521,7 +599,6 @@ class Trainer(nn.Module):
 
                 if best_loss_source > val_loss_source_batch:
                     best_loss_source = val_loss_source_batch
-
                     torch.save(self.gnn_history_source.state_dict(), self.params['gnn_history_source'])
                     torch.save(self.rnn_history_source.state_dict(), self.params['rnn_history_source'])
 
@@ -536,25 +613,30 @@ class Trainer(nn.Module):
 
                     torch.save(self.gnn_aux_add_dest.state_dict(), self.params['gnn_aux_add_dest'])
                     torch.save(self.net_dest.state_dict(), self.params['net_dest'])
+
         except KeyboardInterrupt:
-            print('---'*30)
+            print('---' * 30)
 
         plt.figure(figsize=(15, 8))
         plt.plot(losses_event, label='event')
         plt.plot(losses_source, label='source')
         plt.plot(losses_dest, label='destination')
         plt.legend()
-        plt.savefig(self.params['plot_title'])
+        plt.savefig(self.params['plot_title'], bbox_inches='tight')
         plt.show()
 
-    def fit(self, snapshot_train, snapshot_val):
-        self.train_step(snapshot_train, snapshot_val)
+    def fit(self, snapshot_train, snapshot_val, x_sequences_train, y_sequences_train, is_sampling):
+        self.train_step(snapshot_train, snapshot_val, x_sequences_train, y_sequences_train, is_sampling)
 
-    def generate_graph_rnd_alternative(self, history, num_generation, models_event, models_add_source, models_add_dest):
+    def generate_graph_rnd_alternative(self, history, num_generation, models_event,
+                                                          models_add_source, models_add_dest):
+        path_generated_graphs = self.params['path_generated_graphs']
+
         gnn_history_event, rnn_history_event, event_network = models_event
         gnn_history_source, rnn_history_source, gnn_aux_add_source, net_source = models_add_source
         gnn_history_dest, rnn_history_dest, gnn_aux_add_dest, net_dest = models_add_dest
 
+        device = self.device
 
         generated_snapshot_rnd = []
 
@@ -576,22 +658,22 @@ class Trainer(nn.Module):
 
         with torch.no_grad():
             pbar = tqdm(total=num_generation)
-
             while count < num_generation:
 
                 last_graph = history[-1]
                 last_graph_star = create_graph_star(last_graph.clone())
+                last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
 
                 loader = DataLoader(history, batch_size=self.params['window_size'])
+                it_loader = iter(loader)
+                snapshot = next(it_loader)
 
-                f_tot = None
-                for _time, snapshot in enumerate(loader):
-                    edge_index = snapshot.edge_index.to(self.device)
-                    x = snapshot.x.to(self.device)
-                    edge_index_t = snapshot.edge_index_t.to(self.device)
-                    batch = snapshot.batch.to(self.device)
+                edge_index = snapshot.edge_index.to(self.device)
+                x = snapshot.x.to(self.device)
+                edge_index_t = snapshot.edge_index_t.to(self.device)
+                batch = snapshot.batch.to(self.device)
 
-                    f_tot, _ = gnn_history_event(edge_index, x, edge_index_t, batch)
+                f_tot, _ = gnn_history_event(edge_index, x, edge_index_t, batch)
 
                 _, h_t = rnn_history_event(f_tot)
                 h_t = h_t.flatten()
@@ -599,28 +681,28 @@ class Trainer(nn.Module):
 
                 logit_event = event_network(h_t)
                 p_event = F.softmax(logit_event, -1)
+                p_event = p_event.flatten()
 
                 event = np.random.choice(len(p_event), size=1, p=p_event.cpu().numpy()).item()
 
-                if event == 0:
-                    type_event = 'ADD'
+                if event == 0:  # Add
+                    it_loader = iter(loader)
+                    snapshot = next(it_loader)
 
-                    f_tot = None
-                    for _time, snapshot in enumerate(loader):
-                        edge_index = snapshot.edge_index.to(self.device)
-                        x = snapshot.x.to(self.device)
-                        edge_index_t = snapshot.edge_index_t.to(self.device)
-                        batch = snapshot.batch.to(self.device)
+                    edge_index = snapshot.edge_index.to(device)
+                    x = snapshot.x.to(device)
+                    edge_index_t = snapshot.edge_index_t.to(device)
+                    batch = snapshot.batch.to(device)
 
-                        f_tot, _ = gnn_history_source(edge_index, x, edge_index_t, batch)
+                    f_tot, _ = gnn_history_source(edge_index, x, edge_index_t, batch)
 
                     _, h_t = rnn_history_source(f_tot)
                     h_t = h_t.flatten()
                     h_t = h_t.reshape(1, h_t.shape[0])
 
-                    edge_index = last_graph_star.edge_index.to(self.device)
-                    x = last_graph_star.x.to(self.device)
-                    edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                    edge_index = last_graph_star.edge_index.to(device)
+                    x = last_graph_star.x.to(device)
+                    edge_index_t = last_graph_star.edge_index_t.to(device)
 
                     h_last, z_last = gnn_aux_add_source(edge_index, x, edge_index_t)
                     z_source = net_source(h_t)
@@ -628,22 +710,22 @@ class Trainer(nn.Module):
 
                     p_source = F.softmax(logit_source, -1)
 
-                    f_tot = None
-                    for _time, snapshot in enumerate(loader):
-                        edge_index = snapshot.edge_index.to(self.device)
-                        x = snapshot.x.to(self.device)
-                        edge_index_t = snapshot.edge_index_t.to(self.device)
-                        batch = snapshot.batch.to(self.device)
+                    it_loader = iter(loader)
+                    snapshot = next(it_loader)
+                    edge_index = snapshot.edge_index.to(device)
+                    x = snapshot.x.to(device)
+                    edge_index_t = snapshot.edge_index_t.to(device)
+                    batch = snapshot.batch.to(device)
 
-                        f_tot, _ = gnn_history_dest(edge_index, x, edge_index_t, batch)
+                    f_tot, _ = gnn_history_dest(edge_index, x, edge_index_t, batch)
 
                     _, h_t = rnn_history_dest(f_tot)
                     h_t = h_t.flatten()
                     h_t = h_t.reshape(1, h_t.shape[0])
 
-                    edge_index = last_graph_star.edge_index.to(self.device)
-                    x = last_graph_star.x.to(self.device)
-                    edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                    edge_index = last_graph_star_two.edge_index.to(device)
+                    x = last_graph_star_two.x.to(device)
+                    edge_index_t = last_graph_star_two.edge_index_t.to(device)
 
                     h_last, z_last = gnn_aux_add_dest(edge_index, x, edge_index_t)
 
@@ -658,7 +740,6 @@ class Trainer(nn.Module):
                     pyg = last_graph.clone()
                     G = to_networkx(pyg, to_undirected=False)
                     feat = pyg.x
-                    num_nodes = pyg.num_nodes
 
                     edge_dict = defaultdict(set)
 
@@ -694,14 +775,14 @@ class Trainer(nn.Module):
                     source, dest = sampling(p_source, p_dest, edge_dict, nodes)
 
                     if source not in G.nodes():
-                        feat = torch.cat((feat, torch.ones(1, 1)))
-                        num_nodes += 1
+                        x = torch.ones(1, 1)
+                        feat = torch.cat((feat, x))
 
                         G.add_node(source)
 
                     if dest not in G.nodes():
-                        feat = torch.cat((feat, torch.ones(1, 1)))
-                        num_nodes += 1
+                        x = torch.ones(1, 1)
+                        feat = torch.cat((feat, x))
 
                         G.add_node(dest)
 
@@ -716,6 +797,9 @@ class Trainer(nn.Module):
                                              dim=0)
 
                     pyg.edge_index_t = edge_index_t
+                    pyg.source = source
+                    pyg.dst = dest
+                    pyg.event = 0
 
                     generated_snapshot_rnd.append([count, G.copy(), 'ADD', 'source: ', source, G.in_degree(source),
                                                    'dest: ', dest, G.in_degree(dest)])
@@ -726,25 +810,23 @@ class Trainer(nn.Module):
                     count += 1
                     pbar.update(1)
 
-                else:
-                    type_event = 'REMOVE'
+                else:  # Remove
+                    it_loader = iter(loader)
+                    snapshot = next(it_loader)
+                    edge_index = snapshot.edge_index.to(device)
+                    x = snapshot.x.to(device)
+                    edge_index_t = snapshot.edge_index_t.to(device)
+                    batch = snapshot.batch.to(device)
 
-                    f_tot = None
-                    for _time, snapshot in enumerate(loader):
-                        edge_index = snapshot.edge_index.to(self.device)
-                        x = snapshot.x.to(self.device)
-                        edge_index_t = snapshot.edge_index_t.to(self.device)
-                        batch = snapshot.batch.to(self.device)
-
-                        f_tot, _ = gnn_history_source(edge_index, x, edge_index_t, batch)
+                    f_tot, _ = gnn_history_source(edge_index, x, edge_index_t, batch)
 
                     _, h_t = rnn_history_source(f_tot)
                     h_t = h_t.flatten()
                     h_t = h_t.reshape(1, h_t.shape[0])
 
-                    edge_index = last_graph_star.edge_index.to(self.device)
-                    x = last_graph_star.x.to(self.device)
-                    edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                    edge_index = last_graph_star.edge_index.to(device)
+                    x = last_graph_star.x.to(device)
+                    edge_index_t = last_graph_star.edge_index_t.to(device)
 
                     h_last, z_last = gnn_aux_add_source(edge_index, x, edge_index_t)
                     z_source = net_source(h_t)
@@ -752,22 +834,22 @@ class Trainer(nn.Module):
 
                     p_source = F.softmax(logit_source, -1)
 
-                    f_tot = None
-                    for _time, snapshot in enumerate(loader):
-                        edge_index = snapshot.edge_index.to(self.device)
-                        x = snapshot.x.to(self.device)
-                        edge_index_t = snapshot.edge_index_t.to(self.device)
-                        batch = snapshot.batch.to(self.device)
+                    it_loader = iter(loader)
+                    snapshot = next(it_loader)
+                    edge_index = snapshot.edge_index.to(device)
+                    x = snapshot.x.to(device)
+                    edge_index_t = snapshot.edge_index_t.to(device)
+                    batch = snapshot.batch.to(device)
 
-                        f_tot, _ = gnn_history_dest(edge_index, x, edge_index_t, batch)
+                    f_tot, _ = gnn_history_dest(edge_index, x, edge_index_t, batch)
 
                     _, h_t = rnn_history_dest(f_tot)
                     h_t = h_t.flatten()
                     h_t = h_t.reshape(1, h_t.shape[0])
 
-                    edge_index = last_graph_star.edge_index.to(self.device)
-                    x = last_graph_star.x.to(self.device)
-                    edge_index_t = last_graph_star.edge_index_t.to(self.device)
+                    edge_index = last_graph_star_two.edge_index.to(device)
+                    x = last_graph_star_two.x.to(device)
+                    edge_index_t = last_graph_star_two.edge_index_t.to(device)
 
                     h_last, z_last = gnn_aux_add_dest(edge_index, x, edge_index_t)
 
@@ -781,8 +863,6 @@ class Trainer(nn.Module):
 
                     pyg = last_graph.clone()
                     G = to_networkx(pyg, to_undirected=False)
-                    feat = pyg.x
-                    num_nodes = pyg.num_nodes
 
                     edge_dict = defaultdict(set)
 
@@ -818,12 +898,12 @@ class Trainer(nn.Module):
                     source, dest = sampling(p_source, p_dest, edge_dict, nodes, add=False)
 
                     G.remove_edge(source, dest)
+
                     pyg = from_networkx(G)
 
                     n_nodes = G.number_of_nodes()
                     x = torch.ones((n_nodes, 1))
                     pyg.x = x
-                    pyg.num_nodes = n_nodes
 
                     edge_index = pyg.edge_index
                     edge_index_t = torch.cat((edge_index[1].reshape(1, edge_index[1].shape[0]),
@@ -831,6 +911,9 @@ class Trainer(nn.Module):
                                              dim=0)
 
                     pyg.edge_index_t = edge_index_t
+                    pyg.source = source
+                    pyg.dst = dest
+                    pyg.event = 1
 
                     generated_snapshot_rnd.append([count, G.copy(), 'REMOVE', 'source: ', source, G.in_degree(source),
                                                    'dest: ', dest, G.in_degree(dest)])
@@ -843,4 +926,4 @@ class Trainer(nn.Module):
 
             pbar.close()
 
-        return generated_snapshot_rnd
+        torch.save(generated_snapshot_rnd, path_generated_graphs + '.pt')

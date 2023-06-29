@@ -223,11 +223,442 @@ def create_sequences(data, window_size, window_shift, starting_point=0):
 
     idxs = range(starting_point, len(data) - window_size, window_shift)
 
-    for idx in idxs:
-        x_sequences.append(data[idx:idx + window_size])
-        y_sequences.append(data[idx + window_size])
+    for idx in tqdm(idxs):
+
+        histories = data[idx:idx + window_size]
+        _next = data[idx + window_size]
+        x_sequences.append(histories)
+        y_sequences.append(_next)
 
     return x_sequences, y_sequences
+
+def create_dynamic_loader(x_seq, y_seq, window_size, batch_size, is_synthetic=False):
+    assert batch_size >= 4
+
+    snapshot = []
+
+    histories = []
+    next_graphs = []
+    last_graphs = []
+    last_graphs_star = []
+    last_graphs_star_two = []
+    n_nodes_last_graphs_star = []
+    n_nodes_last_graphs_star_two = []
+    y_sources = []
+    y_destinations = []
+    y_events = []
+
+    negative_source_idxes = []
+    negative_dst_idxes = []
+    positive_source_idxes = []
+    positive_dst_idxes = []
+
+    for idx, history in tqdm(enumerate(x_seq)):
+
+        if is_synthetic:
+            tmp = y_seq[idx]
+            next_graph = y_seq[idx][4]
+            next_graph.num_nodes = None
+            next_graph.source = tmp[2]
+            next_graph.dst = tmp[3]
+            next_graph.event = 0 if tmp[7] == 'Add' else 1
+            last_graph = history[-1][4]
+
+            y_event = list(tmp[8].numpy())
+
+            h = []
+            for e in history:
+                e[4].source = e[2]
+                e[4].dst = e[3]
+                e[4].num_nodes = None
+                e[4].event = 0 if e[7] == 'Add' else 1
+                h.append(e[4])
+            history = h
+
+            y_events.append(y_event)
+        else:
+            next_graph = y_seq[idx]
+            last_graph = history[-1]
+
+        last_graph_star = create_graph_star(last_graph.clone())
+        last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
+
+        y_source = torch.zeros(last_graph_star.x.shape[0])
+        y_source[next_graph.source] = 1
+
+        y_dest = torch.zeros(last_graph_star_two.x.shape[0])
+        y_dest[next_graph.dst] = 1
+
+        histories.extend(history)
+        next_graphs.append(next_graph)
+        last_graphs.append(last_graph)
+        last_graphs_star.append(last_graph_star)
+        last_graphs_star_two.append(last_graph_star_two)
+        n_nodes_last_graphs_star.append(last_graph_star.x.shape[0])
+        n_nodes_last_graphs_star_two.append(last_graph_star_two.x.shape[0])
+        y_sources.append(y_source)
+        y_destinations.append(y_dest)
+
+        negative_source_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.source])
+        negative_dst_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.dst])
+        positive_source_idxes.extend([next_graph.source])
+        positive_dst_idxes.extend([next_graph.dst])
+
+        if (idx + 1) % batch_size == 0 and idx != 0:
+            # idx_tmp = sorted(np.random.choice(range(0, batch_size), size=batch_size//4, replace=False))
+            idx_tmp = np.random.choice(range(0, batch_size), size=batch_size // 4, replace=False)
+            histories_tmp = []
+
+            for idx_enum, idx_data in enumerate(range(0, len(histories), window_size)):
+                if idx_enum in idx_tmp:
+                    start = idx_data
+                    end = idx_data + window_size
+
+                    data = histories[start: end]
+
+                    histories_tmp.extend(data)
+
+            loader = DataLoader(histories_tmp, batch_size=len(idx_tmp) * window_size)
+
+            last_graphs_star = [last_graphs_star[idx] for idx in range(len(last_graphs_star)) if idx in idx_tmp]
+            last_graphs_star_two = [last_graphs_star_two[idx] for idx in range(
+                len(last_graphs_star_two)) if idx in idx_tmp]
+            n_nodes_last_graphs_star = [n_nodes_last_graphs_star[idx] for idx in range(
+                len(n_nodes_last_graphs_star)) if idx in idx_tmp]
+            n_nodes_last_graphs_star_two = [n_nodes_last_graphs_star_two[idx] for idx in range(
+                len(n_nodes_last_graphs_star_two)) if idx in idx_tmp]
+            next_graphs = [next_graphs[idx] for idx in range(len(next_graphs)) if idx in idx_tmp]
+            last_graphs = [last_graphs[idx] for idx in range(len(last_graphs)) if idx in idx_tmp]
+            y_sources = [y_sources[idx] for idx in range(len(y_sources)) if idx in idx_tmp]
+            y_destinations = [y_destinations[idx] for idx in range(len(y_destinations)) if idx in idx_tmp]
+            y_events = [y_events[idx] for idx in range(len(y_events)) if idx in idx_tmp]
+
+            negative_source_idxes = [negative_source_idxes[idx] for idx in range(len(negative_source_idxes)) if idx in idx_tmp]
+            negative_dst_idxes = [negative_dst_idxes[idx] for idx in range(len(negative_dst_idxes)) if
+                                     idx in idx_tmp]
+
+            positive_source_idxes = [positive_source_idxes[idx] for idx in range(len(positive_source_idxes)) if
+                                  idx in idx_tmp]
+            positive_dst_idxes = [positive_dst_idxes[idx] for idx in range(len(positive_dst_idxes)) if
+                                  idx in idx_tmp]
+
+            loader_last_graph_star = DataLoader(last_graphs_star, batch_size=len(idx_tmp))
+            loader_last_graph_star_two = DataLoader(last_graphs_star_two, batch_size=len(idx_tmp))
+
+            # SOURCE
+            max_n = np.max(n_nodes_last_graphs_star)
+            y_sources = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                         y_sources]
+            y_sources = torch.stack(y_sources)
+
+            # DESTINATION
+            max_n = np.max(n_nodes_last_graphs_star_two)
+            y_destinations = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x
+                              in
+                              y_destinations]
+            y_destinations = torch.stack(y_destinations)
+
+            sources = [nx.source for nx in next_graphs]
+            n_nodes_lg = [lg.x.shape[0] + 1 for lg in last_graphs]
+            source_tmp = [x + sum(n_nodes_lg[:i]) for i, x in enumerate(sources)]
+
+            y_events = torch.tensor(y_events)
+
+            snapshot.append([loader, next_graphs, last_graphs, loader_last_graph_star, loader_last_graph_star_two,
+                             n_nodes_last_graphs_star, n_nodes_last_graphs_star_two, y_sources, y_destinations,
+                             source_tmp, y_events, negative_source_idxes, negative_dst_idxes, positive_source_idxes,
+                             positive_dst_idxes])
+
+            histories = []
+            next_graphs = []
+            last_graphs = []
+            last_graphs_star = []
+            last_graphs_star_two = []
+            n_nodes_last_graphs_star = []
+            n_nodes_last_graphs_star_two = []
+            y_sources = []
+            y_destinations = []
+            y_events = []
+            negative_source_idxes = []
+            negative_dst_idxes = []
+            positive_source_idxes = []
+            positive_dst_idxes = []
+
+    if len(x_seq) % batch_size != 0:
+        loader = DataLoader(histories, batch_size=batch_size * window_size)
+
+        loader_last_graph_star = DataLoader(last_graphs_star, batch_size=batch_size)
+        loader_last_graph_star_two = DataLoader(last_graphs_star_two, batch_size=batch_size)
+
+        # SOURCE
+        max_n = np.max(n_nodes_last_graphs_star)
+        y_sources = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                     y_sources]
+        y_sources = torch.stack(y_sources)
+
+        # DESTINATION
+        max_n = np.max(n_nodes_last_graphs_star_two)
+        y_destinations = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                          y_destinations]
+        y_destinations = torch.stack(y_destinations)
+
+        sources = [nx.source for nx in next_graphs]
+        n_nodes_lg = [lg.x.shape[0] + 1 for lg in last_graphs]
+        source_tmp = [x + sum(n_nodes_lg[:i]) for i, x in enumerate(sources)]
+
+        y_events = torch.tensor(y_events)
+
+        # snapshot.append([loader, next_graphs, last_graphs, last_graphs_star, last_graphs_star_two])
+        snapshot.append([loader, next_graphs, last_graphs, loader_last_graph_star, loader_last_graph_star_two,
+                         n_nodes_last_graphs_star, n_nodes_last_graphs_star_two, y_sources, y_destinations,
+                         source_tmp, y_events, negative_source_idxes, negative_dst_idxes, positive_source_idxes,
+                             positive_dst_idxes])
+
+    return snapshot
+
+
+def create_loader(x_seq, y_seq, window_size, batch_size, is_synthetic=False):
+    snapshot = []
+
+    histories = []
+    next_graphs = []
+    last_graphs = []
+    last_graphs_star = []
+    last_graphs_star_two = []
+    n_nodes_last_graphs_star = []
+    n_nodes_last_graphs_star_two = []
+    y_sources = []
+    y_destinations = []
+    y_events = []
+    negative_source_idxes = []
+    negative_dst_idxes = []
+    positive_source_idxes = []
+    positive_dst_idxes = []
+
+    if batch_size == 1:
+        for idx, history in tqdm(enumerate(x_seq)):
+
+            if is_synthetic:
+                tmp = y_seq[idx]
+                next_graph = y_seq[idx][4]
+                next_graph.source = tmp[2]
+                next_graph.dst = tmp[3]
+                next_graph.num_nodes = None
+                next_graph.event = 0 if tmp[7] == 'Add' else 1
+                last_graph = history[-1][4]
+
+                y_event = list(tmp[8].numpy())
+
+                h = []
+                for e in history:
+                    e[4].source = e[2]
+                    e[4].dst = e[3]
+                    e[4].num_nodes = None
+                    e[4].event = 0 if e[7] == 'Add' else 1
+                    h.append(e[4])
+                history = h
+
+                y_events.append(y_event)
+            else:
+                next_graph = y_seq[idx]
+                last_graph = history[-1]
+
+            last_graph_star = create_graph_star(last_graph.clone())
+            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
+
+            y_source = torch.zeros(last_graph_star.x.shape[0])
+            y_source[next_graph.source] = 1
+
+            y_dest = torch.zeros(last_graph_star_two.x.shape[0])
+            y_dest[next_graph.dst] = 1
+
+            histories.extend(history)
+            next_graphs.append(next_graph)
+            last_graphs.append(last_graph)
+            last_graphs_star.append(last_graph_star)
+            last_graphs_star_two.append(last_graph_star_two)
+            n_nodes_last_graphs_star.append(last_graph_star.x.shape[0])
+            n_nodes_last_graphs_star_two.append(last_graph_star_two.x.shape[0])
+            y_sources.append(y_source)
+            y_destinations.append(y_dest)
+            negative_source_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.source])
+            negative_dst_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.dst])
+            positive_source_idxes.extend([next_graph.source])
+            positive_dst_idxes.extend([next_graph.dst])
+
+            loader = DataLoader(histories, batch_size=batch_size * window_size)
+
+            loader_last_graph_star = DataLoader(last_graphs_star, batch_size=batch_size)
+            loader_last_graph_star_two = DataLoader(last_graphs_star_two, batch_size=batch_size)
+
+            # SOURCE
+            max_n = np.max(n_nodes_last_graphs_star)
+            y_sources = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                         y_sources]
+            y_sources = torch.stack(y_sources)
+
+            # DESTINATION
+            max_n = np.max(n_nodes_last_graphs_star_two)
+            y_destinations = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x
+                              in
+                              y_destinations]
+            y_destinations = torch.stack(y_destinations)
+
+            sources = [nx.source for nx in next_graphs]
+            n_nodes_lg = [lg.x.shape[0] + 1 for lg in last_graphs]
+            source_tmp = [x + sum(n_nodes_lg[:i]) for i, x in enumerate(sources)]
+
+            y_events = torch.tensor(y_events)
+
+            # snapshot.append([loader, next_graphs, last_graphs, last_graphs_star, last_graphs_star_two])
+            snapshot.append([loader, next_graphs, last_graphs, loader_last_graph_star, loader_last_graph_star_two,
+                             n_nodes_last_graphs_star, n_nodes_last_graphs_star_two, y_sources, y_destinations,
+                             source_tmp, y_events, negative_source_idxes, negative_dst_idxes, positive_source_idxes,
+                             positive_dst_idxes])
+
+            histories = []
+            next_graphs = []
+            last_graphs = []
+            last_graphs_star = []
+            last_graphs_star_two = []
+            n_nodes_last_graphs_star = []
+            n_nodes_last_graphs_star_two = []
+            y_sources = []
+            y_destinations = []
+            y_events = []
+            negative_source_idxes = []
+            negative_dst_idxes = []
+            positive_source_idxes = []
+            positive_dst_idxes = []
+
+    else:
+
+        for idx, history in tqdm(enumerate(x_seq)):
+
+            if is_synthetic:
+
+                tmp = y_seq[idx]
+                next_graph = y_seq[idx][4]
+                next_graph.source = tmp[2]
+                next_graph.dst = tmp[3]
+                next_graph.num_nodes = None
+                next_graph.event = 0 if tmp[7] == 'Add'else 1
+                last_graph = history[-1][4]
+
+                y_event = list(tmp[8].numpy())
+                y_events.append(y_event)
+
+                h = []
+                for e in history:
+                    e[4].source = e[2]
+                    e[4].dst = e[3]
+                    e[4].num_nodes = None
+                    e[4].event = 0 if e[7] == 'Add' else 1
+                    h.append(e[4])
+                history = h
+            else:
+                next_graph = y_seq[idx]
+                last_graph = history[-1]
+
+            last_graph_star = create_graph_star(last_graph.clone())
+            last_graph_star_two = create_graph_star_two_nodes(last_graph.clone())
+
+            y_source = torch.zeros(last_graph_star.x.shape[0])
+            y_source[next_graph.source] = 1
+
+            y_dest = torch.zeros(last_graph_star_two.x.shape[0])
+            y_dest[next_graph.dst] = 1
+
+            histories.extend(history)
+            next_graphs.append(next_graph)
+            last_graphs.append(last_graph)
+            last_graphs_star.append(last_graph_star)
+            last_graphs_star_two.append(last_graph_star_two)
+            n_nodes_last_graphs_star.append(last_graph_star.x.shape[0])
+            n_nodes_last_graphs_star_two.append(last_graph_star_two.x.shape[0])
+            y_sources.append(y_source)
+            y_destinations.append(y_dest)
+            negative_source_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.source])
+            negative_dst_idxes.append([node for node in range(next_graph.x.shape[0]) if node != next_graph.dst])
+            positive_source_idxes.extend([next_graph.source])
+            positive_dst_idxes.extend([next_graph.dst])
+
+            if (idx + 1) % batch_size == 0 and idx != 0:
+                loader = DataLoader(histories, batch_size=batch_size * window_size)
+
+                loader_last_graph_star = DataLoader(last_graphs_star, batch_size=batch_size)
+                loader_last_graph_star_two = DataLoader(last_graphs_star_two, batch_size=batch_size)
+
+                # SOURCE
+                max_n = np.max(n_nodes_last_graphs_star)
+                y_sources = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                             y_sources]
+                y_sources = torch.stack(y_sources)
+
+                # DESTINATION
+                max_n = np.max(n_nodes_last_graphs_star_two)
+                y_destinations = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x
+                                  in
+                                  y_destinations]
+                y_destinations = torch.stack(y_destinations)
+
+                sources = [nx.source for nx in next_graphs]
+                n_nodes_lg = [lg.x.shape[0] + 1 for lg in last_graphs]
+                source_tmp = [x + sum(n_nodes_lg[:i]) for i, x in enumerate(sources)]
+
+                y_events = torch.tensor(y_events)
+
+                # snapshot.append([loader, next_graphs, last_graphs, last_graphs_star, last_graphs_star_two])
+                snapshot.append([loader, next_graphs, last_graphs, loader_last_graph_star, loader_last_graph_star_two,
+                                 n_nodes_last_graphs_star, n_nodes_last_graphs_star_two, y_sources, y_destinations,
+                                 source_tmp, y_events, negative_source_idxes, negative_dst_idxes, positive_source_idxes,
+                                positive_dst_idxes])
+
+                histories = []
+                next_graphs = []
+                last_graphs = []
+                last_graphs_star = []
+                last_graphs_star_two = []
+                n_nodes_last_graphs_star = []
+                n_nodes_last_graphs_star_two = []
+                y_sources = []
+                y_destinations = []
+                y_events = []
+                negative_source_idxes = []
+                negative_dst_idxes = []
+                positive_source_idxes = []
+                positive_dst_idxes = []
+
+        if len(x_seq) % batch_size != 0:
+            loader = DataLoader(histories, batch_size=batch_size * window_size)
+
+            loader_last_graph_star = DataLoader(last_graphs_star, batch_size=batch_size)
+            loader_last_graph_star_two = DataLoader(last_graphs_star_two, batch_size=batch_size)
+
+            # SOURCE
+            max_n = np.max(n_nodes_last_graphs_star)
+            y_sources = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                         y_sources]
+            y_sources = torch.stack(y_sources)
+
+            # DESTINATION
+            max_n = np.max(n_nodes_last_graphs_star_two)
+            y_destinations = [torch.nn.functional.pad(x, pad=(0, max_n - x.numel()), mode='constant', value=0) for x in
+                              y_destinations]
+            y_destinations = torch.stack(y_destinations)
+            sources = [nx.source for nx in next_graphs]
+            n_nodes_lg = [lg.x.shape[0] + 1 for lg in last_graphs]
+            source_tmp = [x + sum(n_nodes_lg[:i]) for i, x in enumerate(sources)]
+
+            y_events = torch.tensor(y_events)
+
+            # snapshot.append([loader, next_graphs, last_graphs, last_graphs_star, last_graphs_star_two])
+            snapshot.append([loader, next_graphs, last_graphs, loader_last_graph_star, loader_last_graph_star_two,
+                             n_nodes_last_graphs_star, n_nodes_last_graphs_star_two, y_sources, y_destinations,
+                             source_tmp, y_events, negative_source_idxes, negative_dst_idxes, positive_source_idxes,
+                             positive_dst_idxes])
+
+    return snapshot
 
 
 def create_graph_star(graph):
@@ -240,24 +671,6 @@ def create_graph_star_two_nodes(graph):
     graph_x = torch.cat((graph.x, torch.ones(2, graph.x.shape[1])))
     graph.x = graph_x
     return graph
-
-
-def create_loader(x_seq, y_seq, window_size):
-    snapshot = []
-
-    for idx, history in enumerate(x_seq):
-        next_graph = y_seq[idx]
-        last_graph = history[-1][4]
-        last_graph_star = create_graph_star(last_graph.clone())
-
-        h = []
-        for e in history:
-            h.append(e[4])
-
-        loader = DataLoader(h, batch_size=window_size)
-        snapshot.append([loader, next_graph, last_graph, last_graph_star])
-
-    return snapshot
 
 
 def create_loader_remove(x_seq, y_seq, window_size):
@@ -284,86 +697,6 @@ def create_loader_remove(x_seq, y_seq, window_size):
     return snapshot
 
 
-def load_synthetic(params):
-    path_file = params['path_file']
-    snap = loadList(path_file)
-
-    print('% All dataset ...')
-    count_add = 0
-    count_remove = 0
-    for elem in snap:
-        if elem[7] == 'Add':
-            count_add += 1
-        else:
-            count_remove += 1
-
-    print(count_add / (count_add + count_remove))
-    print(count_remove / (count_add + count_remove))
-
-    amount = len(snap)
-
-    perc_train = params['perc_train']
-    perc_val_test = (1 - perc_train) / 2
-
-    print(f'% train: {perc_train}, % val: {perc_val_test}')
-
-    train_size = int(amount * perc_train)
-    val_size = int(amount * perc_val_test)
-
-    train_set = snap[0:train_size]
-    val_set = snap[train_size:train_size + val_size]
-    test_set = snap[train_size + val_size:]
-
-    print('% Training set ...')
-    count_add = 0
-    count_remove = 0
-    for elem in train_set:
-        if elem[7] == 'Add':
-            count_add += 1
-        else:
-            count_remove += 1
-
-    print(count_add / (count_add + count_remove))
-    print(count_remove / (count_add + count_remove))
-
-    print('% Val set ...')
-    count_add = 0
-    count_remove = 0
-    for elem in val_set:
-        if elem[7] == 'Add':
-            count_add += 1
-        else:
-            count_remove += 1
-
-    print(count_add / (count_add + count_remove))
-    print(count_remove / (count_add + count_remove))
-
-    print('% Test set ...')
-    count_add = 0
-    count_remove = 0
-    for elem in test_set:
-        if elem[7] == 'Add':
-            count_add += 1
-        else:
-            count_remove += 1
-
-    print(count_add / (count_add + count_remove))
-    print(count_remove / (count_add + count_remove))
-
-    window_size = params['window_size']
-    window_shift = params['window_shift']
-
-    x_sequences_train, y_sequences_train = create_sequences(train_set, window_size, window_shift)
-    x_sequences_val, y_sequences_val = create_sequences(val_set, window_size, window_shift)
-    x_sequences_test, y_sequences_test = create_sequences(test_set, window_size, window_shift)
-
-    snapshot_train = create_loader_remove(x_sequences_train, y_sequences_train, window_size)
-    snapshot_val = create_loader_remove(x_sequences_val, y_sequences_val, window_size)
-    snapshot_test = create_loader_remove(x_sequences_test, y_sequences_test, window_size)
-
-    return snapshot_train, snapshot_test, snapshot_val, train_set, test_set, val_set
-
-
 def load_data(params):
     file_name = params['file_name']
     window_size = params['window_size']
@@ -378,7 +711,7 @@ def load_data(params):
         from utils.create_data import create_data_bitcoin_alpha
 
         print('Loading data ...')
-        snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set = create_data_bitcoin_alpha(
+        x_sequences_train, y_sequences_train, snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set, _, _, _ = create_data_bitcoin_alpha(
             file_name, window_size=window_size, window_shift=window_shift, is_data=create_data,
             path_generation=path_generation, path_regression=path_regression, perc_train=perc_train, features=False
         )
@@ -386,26 +719,26 @@ def load_data(params):
     elif dataset == 'bitcoin_OTC_no_features':
         from utils.create_data import create_data_bitcoin
 
-        snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set = create_data_bitcoin(
+        x_sequences_train, y_sequences_train, snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set, _, _, _ = create_data_bitcoin(
             file_name, window_size=window_size, window_shift=window_shift, is_data=create_data,
             path_generation=path_generation, path_regression=path_regression, perc_train=perc_train, features=False
         )
 
     elif dataset == 'eu_core_no_dupl':
         from utils.create_data import create_data_eu_core_no_dupl
-        snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set = create_data_eu_core_no_dupl(
+        x_sequences_train, y_sequences_train, snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set, _, _, _ = create_data_eu_core_no_dupl(
             file_name, window_size=window_size, window_shift=window_shift, is_data=create_data,
             path_generation=path_generation, path_regression=path_regression, perc_train=perc_train
         )
 
     elif dataset == 'synthetic_graph_power_law_with_remove_no_dupl':
-        from utils.utils import load_synthetic
-        snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set = load_synthetic(params)
+        from utils.create_data import load_synthetic
+        x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_val_gen, _, train_set, val_set, test_set = load_synthetic(params)
 
     elif dataset == 'uci_forum_no_dupl':
         from utils.create_data import create_data_uci_forum
 
-        snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set = create_data_uci_forum(
+        x_sequences_train, y_sequences_train, snapshot_train_gen, _, snapshot_val_gen, train_set, test_set, val_set, _, _, _ = create_data_uci_forum(
             file_name, window_size=window_size, window_shift=window_shift, is_data=create_data,
             path_generation=path_generation, path_regression=path_regression, perc_train=perc_train
         )
@@ -414,7 +747,7 @@ def load_data(params):
         print('No dataset available')
         sys.exit(-1)
 
-    return snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set
+    return x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set
 
 
 def wl_test_run(WL_start, G_real, G_pred, diameter):
@@ -515,7 +848,24 @@ def compute_wl_similarity(params, true_snapshot):
 
 def run_generation_synthetic(trainer, params, history, num_generation):
 
-    if params['model_name'] == 'fudge':
+    if params['model_name'] == 'fudge_h_2a':
+        trainer.gnn_history.load_state_dict(torch.load(params['gnn_history']))
+        trainer.rnn_history.load_state_dict(torch.load(params['rnn_history']))
+
+        trainer.gnn_aux_add_source.load_state_dict(torch.load(params['gnn_aux_add_source']))
+        trainer.gnn_aux_add_dest.load_state_dict(torch.load(params['gnn_aux_add_dest']))
+
+        trainer.event.load_state_dict(torch.load(params['event_network']))
+        trainer.net_source.load_state_dict(torch.load(params['net_source']))
+        trainer.net_dest.load_state_dict(torch.load(params['net_dest']))
+
+        models = (trainer.gnn_history, trainer.rnn_history, trainer.gnn_aux_add_source, trainer.gnn_aux_add_dest,
+                  trainer.event,
+                  trainer.net_source, trainer.net_dest)
+
+        trainer.generate_graph_rnd_alternative(history, num_generation, models)
+
+    else:
         trainer.gnn_history_event.load_state_dict(torch.load(params['gnn_history_event']))
         trainer.rnn_history_event.load_state_dict(torch.load(params['rnn_history_event']))
         trainer.event.load_state_dict(torch.load(params['event_network']))
@@ -538,9 +888,8 @@ def run_generation_synthetic(trainer, params, history, num_generation):
         models_add_dest = (trainer.gnn_history_dest, trainer.rnn_history_dest, trainer.gnn_aux_add_dest,
                            trainer.net_dest)
 
-    generated_snapshot = trainer.generate_graph_rnd_alternative(history, num_generation, models_event,
-                                                                models_add_source, models_add_dest)
+        trainer.generate_graph_rnd_alternative(history, num_generation, models_event,
+                                                                    models_add_source, models_add_dest)
 
-    torch.save(generated_snapshot, params['path_generated_graphs'])
 
 
