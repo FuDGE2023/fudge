@@ -43,10 +43,10 @@ class EncoderGIN(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, edge_index, x, edge_index_t, batch=None):
-        h11 = self.conv1(x, edge_index)  # N x z_dim
-        h12 = self.conv1(x, edge_index_t)  # N x Z_dim
+        h11 = self.conv1(x, edge_index)
+        h12 = self.conv1(x, edge_index_t)
 
-        h1 = torch.cat((h11, h12), 1)  # N x z_dim*2
+        h1 = torch.cat((h11, h12), 1)
         h1 = F.relu(self.fc1(h1))
 
         h21 = self.conv2(h1, edge_index)
@@ -78,11 +78,9 @@ class RecurrentNetwork(nn.Module):
         self.num_layers = num_layers
 
         self.rnn = nn.GRU(self.num_features, self.h_dim, self.num_layers, batch_first=True)
-        # self.rnn2 = nn.GRU(self.h_dim, self.h_dim, self.num_layers, batch_first=True)
 
     def forward(self, x):
         output, hidden = self.rnn(x)
-        # output, hidden = self.rnn2(output, hidden)
 
         return output, hidden
 
