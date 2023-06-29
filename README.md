@@ -20,12 +20,15 @@ where config_name is the name of the experimental configuration file.
 
 main.py module imports the needed libraries and set the environment variable to activate the GPU device.
 
-- create_data = 1 &rarr; to create the dataset
+- create_data = 1 &rarr; to create the dataset for the training and inference phases
+  - 'snapshots_generation_{dataset_name}.pt' is used for the training, while 
+  - 'snapshots_regression_{dataset_name}.pt' is used for generating novel graphs
 - train = 1 &rarr; to train the model
 - generate_test = 1 &rarr; to generate test graphs
 - generate_val = 1 &rarr; to generate val graphs
 - compute_wl_test = 1 &rarr; to compute wl-similarity for test
 - compute_wl_val = 1 &rarr; to compute wl-similarity for validation
+- is_sampling = 1 &rarr; to sample graphs within each batch
 
 ## Dataset Reference
 
