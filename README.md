@@ -30,6 +30,12 @@ main.py module imports the needed libraries and set the environment variable to 
 - compute_wl_val = 1 &rarr; to compute wl-similarity for validation
 - is_sampling = 1 &rarr; to sample graphs within each batch
 
+The pre-trained models produced by FuDGE notebooks area available to [link](https://drive.google.com/drive/folders/1lPOrjX99lIQryd3IJVAJOdlvNlfRWzrP?usp=share_link) 
+
+The following table shows the results presented in the paper.
+
+![](table.png)
+
 ## Dataset Reference
 
 - [Bitcoin-Alpha](https://snap.stanford.edu/data/soc-sign-bitcoin-alpha.html)

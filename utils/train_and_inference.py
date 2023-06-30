@@ -25,14 +25,14 @@ def run_real_world_datasets(params):
 
     params['exp'] = exp
 
-    params['gnn_history_source'] = f'{checkpoint}/gnn_history_source_' + dataset + '_' + exp + '.pt'
-    params['rnn_history_source'] = f'{checkpoint}/rnn_history_source_' + dataset + '_' + exp + '.pt'
-    params['gnn_aux_add_source'] = f'{checkpoint}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
-    params['net_source'] = f'{checkpoint}/net_source_' + dataset + '_' + exp + '.pt'
-    params['gnn_history_dest'] = f'{checkpoint}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
-    params['rnn_history_dest'] = f'{checkpoint}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
-    params['gnn_aux_add_dest'] = f'{checkpoint}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
-    params['net_dest'] = f'{checkpoint}/net_dest_' + dataset + '_' + exp + '.pt'
+    params['gnn_history_source'] = f'{checkpoint}/{dataset}/gnn_history_source_' + dataset + '_' + exp + '.pt'
+    params['rnn_history_source'] = f'{checkpoint}/{dataset}/rnn_history_source_' + dataset + '_' + exp + '.pt'
+    params['gnn_aux_add_source'] = f'{checkpoint}/{dataset}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
+    params['net_source'] = f'{checkpoint}/{dataset}/net_source_' + dataset + '_' + exp + '.pt'
+    params['gnn_history_dest'] = f'{checkpoint}/{dataset}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
+    params['rnn_history_dest'] = f'{checkpoint}/{dataset}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
+    params['gnn_aux_add_dest'] = f'{checkpoint}/{dataset}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
+    params['net_dest'] = f'{checkpoint}/{dataset}/net_dest_' + dataset + '_' + exp + '.pt'
     params['plot_title'] = f'{space_plot_losses}/losses_{dataset}_{exp}.pdf'
 
     x_sequences_train, y_sequences_train, snapshot_train_gen, snapshot_val_gen, train_set, test_set, val_set = load_data(params)
@@ -289,17 +289,17 @@ def run_synthetic_data(params):
         exp = f'fact_{f}_{split}_ICDM2023'
         params['exp'] = exp
 
-        params['gnn_history_event'] = f'{checkpoint}/gnn_history_event_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_event'] = f'{checkpoint}/rnn_history_event_' + dataset + '_' + exp + '.pt'
-        params['event_network'] = f'{checkpoint}/event_network' + dataset + '_' + exp + '.pt'
-        params['gnn_history_source'] = f'{checkpoint}/gnn_history_source_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_source'] = f'{checkpoint}/rnn_history_source_' + dataset + '_' + exp + '.pt'
-        params['gnn_aux_add_source'] = f'{checkpoint}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
-        params['net_source'] = f'{checkpoint}/net_source_' + dataset + '_' + exp + '.pt'
-        params['gnn_history_dest'] = f'{checkpoint}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
-        params['rnn_history_dest'] = f'{checkpoint}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
-        params['gnn_aux_add_dest'] = f'{checkpoint}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
-        params['net_dest'] = f'{checkpoint}/net_dest_' + dataset + '_' + exp + '.pt'
+        params['gnn_history_event'] = f'{checkpoint}/{dataset}/gnn_history_event_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_event'] = f'{checkpoint}/{dataset}/rnn_history_event_' + dataset + '_' + exp + '.pt'
+        params['event_network'] = f'{checkpoint}/{dataset}/event_network' + dataset + '_' + exp + '.pt'
+        params['gnn_history_source'] = f'{checkpoint}/{dataset}/gnn_history_source_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_source'] = f'{checkpoint}/{dataset}/rnn_history_source_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_source'] = f'{checkpoint}/{dataset}/gnn_aux_add_source_' + dataset + '_' + exp + '.pt'
+        params['net_source'] = f'{checkpoint}/{dataset}/net_source_' + dataset + '_' + exp + '.pt'
+        params['gnn_history_dest'] = f'{checkpoint}/{dataset}/gnn_history_dest_' + dataset + '_' + exp + '.pt'
+        params['rnn_history_dest'] = f'{checkpoint}/{dataset}/rnn_history_dest_' + dataset + '_' + exp + '.pt'
+        params['gnn_aux_add_dest'] = f'{checkpoint}/{dataset}/gnn_aux_add_dest_' + dataset + '_' + exp + '.pt'
+        params['net_dest'] = f'{checkpoint}/{dataset}/cnet_dest_' + dataset + '_' + exp + '.pt'
 
     params['plot_title'] = f'{space_plot_losses}/losses_{dataset}_{exp}.pdf'
     print('Loading data ...')
