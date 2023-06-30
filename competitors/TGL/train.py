@@ -30,8 +30,12 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed(seed)
+    torch.use_deterministic_algorithms = True
+    torch.backends.cudnn.benchmark = False
 
-# set_seed(0)
+
+set_seed(0)
 data = args.data
 
 node_feats, edge_feats = load_feat(data, args.rand_edge_features, args.rand_node_features)

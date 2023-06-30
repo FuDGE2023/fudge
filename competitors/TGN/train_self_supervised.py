@@ -16,6 +16,9 @@ from utils.utils import EarlyStopMonitor, RandEdgeSampler, get_neighbor_finder
 from utils.data_processing import get_data, compute_time_statistics
 
 torch.manual_seed(0)
+torch.cuda.manual_seed(0)
+torch.use_deterministic_algorithms = True
+torch.backends.cudnn.benchmark = False
 np.random.seed(0)
 
 ### Argument and global variables

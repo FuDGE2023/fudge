@@ -69,6 +69,13 @@ SELF_DIM = args.self_dim
 NGH_DIM = ngh_dim
 assert(NUM_HOP < 3) # only up to second hop is supported
 set_random_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.cuda.manual_seed(SEED)
+torch.use_deterministic_algorithms = True
+torch.backends.cudnn.benchmark = False
 logger, get_checkpoint_path, get_ngh_store_path, get_self_rep_path, get_prev_raw_path, best_model_path,\
 best_model_ngh_store_path = set_up_logger(args, sys_argv, dataset, n_degree, ngh_dim, perc_train)
 

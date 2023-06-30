@@ -136,8 +136,8 @@ def load_models_graphs(model, dataset, split_percentage, factor, id_last_graph, 
                 dataset = "snapshots_regression_bitcoin_alpha_no_features"
 
         if model in ['TGN', 'TGL', 'NAT']:
-            path = "./generated_data/{}/generated_{}_graphs/{}/{}_test/graph_{}.pt" \
-                .format(split_percentage, dataset, model, factor, id_last_graph)
+            path = "./competitors/{}/generated_data/{}/generated_{}_graphs/{}/{}_test/graph_{}.pt" \
+                .format(model, split_percentage, dataset, model, factor, id_last_graph)
         else:
             path = "./generated_data/{}/generated_{}_graphs/{}/graph_{}.pt" \
                 .format(split_percentage, dataset, model, id_last_graph)
