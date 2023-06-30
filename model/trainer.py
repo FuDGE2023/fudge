@@ -83,7 +83,6 @@ class Trainer(nn.Module):
         self.optim_net_dest = torch.optim.Adam(self.net_dest.parameters(), lr=self.learning_rate_dest)
 
         self.cel = nn.CrossEntropyLoss(reduction='mean')
-        self.print_n_params()
 
         self.scaler = torch.cuda.amp.GradScaler()
 
