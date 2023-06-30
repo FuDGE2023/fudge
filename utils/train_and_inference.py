@@ -81,11 +81,13 @@ def compute_metrics(params):
     window_shift = params['window_shift']
     perc_train = params['perc_train']
     f = params['f']
+    bs = params['batch_size']
+    is_sampling = params['is_sampling']
     dataset = params['dataset']
     folder_generation_graphs = params['folder_generation_graphs']
 
-    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_nlayers3'
-    exp = f'fact_{f}_{split}_new'
+    split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_bs_{bs}_is_sampling_{is_sampling}'
+    exp = f'fact_{f}_{split}_ICDM2023'
     params['exp'] = exp
 
     _, _, _, _, _, test_set, val_set = load_data(params)
