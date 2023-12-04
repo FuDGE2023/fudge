@@ -10,7 +10,9 @@ Parameters semantic:
 * --validation_set --> True if the computation has to be on the validation set, False for the test set
 * --need_regressor --> True if the dataset can have multiple operations per timestamp, False otherwise
 * --factor -> TGN available factors: graph_attention, graph_sum, identity, time
-
+* --sample_size --> sample size for the generation phase
+* --seed
+* 
 Steps to run the experiments:
 
 1) Dataset processing
