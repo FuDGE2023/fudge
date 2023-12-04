@@ -10,6 +10,7 @@
   "space_plot_losses": "./plot_losses",
   "space_results_losses": "./results_losses",
   "folder_generation_graphs": "./generated_graphs",
+  "project_name": "your_project_name",
   "window_size": 30,
   "window_shift": 10,
   "perc_train": 0.6,
