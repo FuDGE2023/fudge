@@ -19,9 +19,10 @@ def run_real_world_datasets(params):
     dataset = params['dataset']
     folder_generation_graphs = params['folder_generation_graphs']
     space_plot_losses = params['space_plot_losses']
+    project_name = params['project_name']
 
     split = f'split_{perc_train}_w_size_{window_size}_w_shift_{window_shift}_bs_{bs}_is_sampling_{is_sampling}'
-    exp = f'fact_{f}_{split}_ICDM2023'
+    exp = f'fact_{f}_{split}_{project_name}'
 
     params['exp'] = exp
 
@@ -290,7 +291,8 @@ def run_synthetic_data(params):
     else:
         # FuDGE
         from model.trainer_remove import Trainer
-        exp = f'fact_{f}_{split}_ICDM2023'
+        project_name = params['project_name']
+        exp = f'fact_{f}_{split}_{project_name}'
         params['exp'] = exp
 
         params['gnn_history_event'] = f'{checkpoint}/gnn_history_event_' + dataset + '_' + exp + '.pt'

@@ -145,9 +145,9 @@ def load_models_graphs(model, dataset, split_percentage, factor, id_last_graph, 
         generated_snapshot = torch.load(path)
     else:
         generated_graphs = './generated_graphs'
-
+        project_name = 'your_project_name'
         split = f'split_{perc_train}_w_size_30_w_shift_10_bs_{bs}_is_sampling_1'
-        exp = f'fact_{factor}_{split}_ICDM2023'
+        exp = f'fact_{factor}_{split}_{project_name}'
 
         dataset_only_name = ""
 
