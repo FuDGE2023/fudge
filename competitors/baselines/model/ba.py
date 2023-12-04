@@ -3,14 +3,14 @@ import torch_geometric
 import numpy as np
 from time import time
 
-def _random_subset(seq, m, rng):
+def _random_subset(seq, m):
     targets = set()
     while len(targets) < m:
         x = np.random.choice(seq)
         targets.add(x)
     return targets
 
-def barabasi_albert_graph(num_generations, m, seed, initial_graph, full_generation_path, regressor):
+def barabasi_albert_graph(num_generations, m, initial_graph, full_generation_path, regressor):
 
     G = initial_graph.copy()
     graphs = []
@@ -27,7 +27,7 @@ def barabasi_albert_graph(num_generations, m, seed, initial_graph, full_generati
         for j in range(n_operations_list[i]):
             # Now choose m unique nodes from the existing nodes
             # Pick uniformly from repeated_nodes (preferential attachment)
-            targets = _random_subset(repeated_nodes, m, seed)
+            targets = _random_subset(repeated_nodes, m)
             # Add edges to m nodes from the source.
             G.add_edges_from(zip([source] * m, targets))
             # Add one node to the list for each new edge just created.
@@ -58,11 +58,10 @@ def barabasi_albert_generator(history, params):
     regressor = params['regressor']
     full_generation_path = params['full_generation_path']
 
-    torch.manual_seed(seed)
     np.random.seed(seed)
 
     m = 1
-    graphs = barabasi_albert_graph(num_generations, m, seed, history, full_generation_path, regressor)
+    graphs = barabasi_albert_graph(num_generations, m, history, full_generation_path, regressor)
 
     return graphs
 

@@ -29,8 +29,8 @@ def main(fname):
     seed = params['seed']
 
     perc_train = params['perc_train']
-    params['full_generation_path'] = "{}/{}/generated_{}_graphs".format(folder_generation_graphs, perc_train,
-                                                                         dataset)
+    params['full_generation_path'] = "{}/{}/{}/generated_{}_graphs".format(folder_generation_graphs, perc_train,
+                                                                         dataset, seed)
 
     for dir in [space_wl_results, params['full_generation_path']]:
         if not os.path.exists(dir):

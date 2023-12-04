@@ -127,6 +127,10 @@ class NeighborFinder:
     Returns 3 lists: neighbors, edge_idxs, timestamps
 
     """
+
+    if src_idx >= len(self.node_to_edge_timestamps):
+      return [], [], []
+
     i = np.searchsorted(self.node_to_edge_timestamps[src_idx], cut_time)
 
     return self.node_to_neighbors[src_idx][:i], self.node_to_edge_idxs[src_idx][:i], self.node_to_edge_timestamps[src_idx][:i]
@@ -156,6 +160,7 @@ class NeighborFinder:
       # print(source_node)
       # print(len(self.node_to_edge_timestamps))
       # exit(0)
+
       source_neighbors, source_edge_idxs, source_edge_times = self.find_before(source_node,
                                                    timestamp)
       # extracts all neighbors, interactions indexes and timestamps of all interactions of user source_node happening before cut_time

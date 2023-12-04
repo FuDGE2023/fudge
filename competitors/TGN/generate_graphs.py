@@ -11,7 +11,8 @@ import numpy as np
 import pickle
 from tqdm import tqdm
 from pathlib import Path
-
+from itertools import chain
+from scipy.special import softmax
 import torch_geometric
 
 from evaluation.evaluation import eval_edge_prediction
@@ -21,19 +22,14 @@ from utils.data_processing import get_data, compute_time_statistics, Data, loadL
 
 from regressor import DiscreteRegressor
 
-seed = 12345
 
-torch.manual_seed(seed)
-np.random.seed(seed)
-
-def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negative_edges: int, tries=5):
+def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negative_edges: int, tries=5, all=False, seed=123456):
     negative_edges = dict()
 
-    while len(negative_edges) < n_negative_edges:
-        if tries <= 0:
-            break
+    np.random.seed(seed)
 
-        for src in np.random.choice(list(all_nodes), size=n_negative_edges):
+    if all:
+        for src in range(len(all_nodes)):
             negatives = set(all_nodes)
 
             if src in existing_edges.keys():
@@ -46,13 +42,42 @@ def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negativ
                 negatives = negatives - positive_edges[src]
 
             if len(negatives) > 0:
-                negative_edges[src] = np.random.choice(list(negatives), size=1)
+                if src not in negative_edges.keys():
+                    negative_edges[src] = []
 
-            if len(negative_edges) >= n_negative_edges:
-                tries = 0
+                negative_edges[src].extend(list(negatives))
+    else:
+
+        negative_edges_cont = 0
+
+        while negative_edges_cont < n_negative_edges:
+            if tries <= 0:
                 break
 
-        tries -= 1
+            for src in np.random.choice(list(all_nodes), size=n_negative_edges):
+                negatives = set(all_nodes)
+
+                if src in existing_edges.keys():
+                    negatives = negatives - set(existing_edges[src])
+
+                if src in negative_edges.keys():
+                    negatives = negatives - set(negative_edges[src])
+
+                #if src in positive_edges.keys():
+                #    negatives = negatives - positive_edges[src]
+
+                if len(negatives) > 0:
+                    if src not in negative_edges.keys():
+                        negative_edges[src] = []
+
+                    negative_edges[src].extend(np.random.choice(list(negatives), size=1))
+                    negative_edges_cont += 1
+
+                if negative_edges_cont >= n_negative_edges:
+                    tries = 0
+                    break
+
+            tries -= 1
 
     return negative_edges
 
@@ -110,6 +135,8 @@ parser.add_argument('--dyrep', action='store_true',
                     help='Whether to run the dyrep model')
 
 parser.add_argument('--validation_set', type=str)
+parser.add_argument('--seed', type=int)
+parser.add_argument('--sample_size', type=int, default=100, help='number of edges to sample')
 
 
 try:
@@ -122,7 +149,14 @@ factor = args.factor
 perc_train = args.perc_train
 dataset_name = args.data
 validation_set = True if args.validation_set == "True" else False
+sample_size = args.sample_size
+seed = args.seed
 
+torch.manual_seed(seed)
+np.random.seed(seed)
+torch.cuda.manual_seed(seed)
+torch.use_deterministic_algorithms = True
+torch.backends.cudnn.benchmark = False
 
 BATCH_SIZE = args.bs
 NUM_NEIGHBORS = args.n_degree
@@ -156,7 +190,7 @@ new_node_test_data  = get_data(dataset_name,
 
 # Set device
 device_string = 'cuda:{}'.format(GPU) if torch.cuda.is_available() else 'cpu'
-device_string = 'cpu'
+#device_string = 'cpu'
 device = torch.device(device_string)
 
 # Compute time statistics
@@ -170,32 +204,33 @@ best_model_path = "saved_models/{}_{}_{}.pth".format(dataset_name, factor, perc_
 
 # Initialize Model
 tgn = TGN(neighbor_finder=train_ngh_finder, node_features=node_features,
-        edge_features=edge_features, device=device,
-        n_layers=NUM_LAYER,
-        n_heads=NUM_HEADS, dropout=DROP_OUT, use_memory=USE_MEMORY,
-        message_dimension=MESSAGE_DIM, memory_dimension=MEMORY_DIM,
-        memory_update_at_start=not args.memory_update_at_end,
-        embedding_module_type=args.embedding_module,
-        message_function=args.message_function,
-        aggregator_type=args.aggregator,
-        memory_updater_type=args.memory_updater,
-        n_neighbors=NUM_NEIGHBORS,
-        mean_time_shift_src=mean_time_shift_src, std_time_shift_src=std_time_shift_src,
-        mean_time_shift_dst=mean_time_shift_dst, std_time_shift_dst=std_time_shift_dst,
-        use_destination_embedding_in_message=args.use_destination_embedding_in_message,
-        use_source_embedding_in_message=args.use_source_embedding_in_message,
-        dyrep=args.dyrep)
+                    edge_features=edge_features, device=device,
+                    n_layers=NUM_LAYER,
+                    n_heads=NUM_HEADS, dropout=DROP_OUT, use_memory=USE_MEMORY,
+                    message_dimension=MESSAGE_DIM, memory_dimension=MEMORY_DIM,
+                    memory_update_at_start=not args.memory_update_at_end,
+                    embedding_module_type=args.embedding_module,
+                    message_function=args.message_function,
+                    aggregator_type=args.aggregator,
+                    memory_updater_type=args.memory_updater,
+                    n_neighbors=NUM_NEIGHBORS,
+                    mean_time_shift_src=mean_time_shift_src, std_time_shift_src=std_time_shift_src,
+                    mean_time_shift_dst=mean_time_shift_dst, std_time_shift_dst=std_time_shift_dst,
+                    use_destination_embedding_in_message=args.use_destination_embedding_in_message,
+                    use_source_embedding_in_message=args.use_source_embedding_in_message,
+                    dyrep=args.dyrep)
 tgn = tgn.to(device)
 
-tgn.load_state_dict(torch.load(best_model_path))
+tgn.load_state_dict(torch.load(best_model_path, map_location=device))
+# tgn.load_state_dict(torch.load(best_model_path))
 tgn.eval()
 
 # num_generations = test_data.n_interactions
 
 end_filename = "val" if validation_set else "test"
 
-if not os.path.exists("./generated_data/{}/generated_{}_graphs/TGN/{}_{}".format(perc_train, dataset_name, factor, end_filename)):
-    os.makedirs("./generated_data/{}/generated_{}_graphs/TGN/{}_{}".format(perc_train, dataset_name, factor, end_filename))
+if not os.path.exists("./generated_data/{}/generated_{}_graphs/TGN/{}/{}/{}_{}".format(perc_train, dataset_name, seed, sample_size, factor, end_filename)):
+    os.makedirs("./generated_data/{}/generated_{}_graphs/TGN/{}/{}/{}_{}".format(perc_train, dataset_name, seed, sample_size, factor, end_filename))
 
 with torch.no_grad():
     tgn = tgn.eval()
@@ -310,22 +345,24 @@ with torch.no_grad():
                 real_edges[s].add(d)
         # print(len(real_edges))
 
-        if validation_set:
-            sample_to_generate = 500
-        else:
-            sample_to_generate = 1000
-        t = time.time()
-        negative_edges = sample(all_nodes, existing_edges, real_edges, sample_to_generate, 2)
-
-        # print(len(negative_edges))
+        sample_to_generate = sample_size
+        sample_to_generate_tmp = sample_to_generate
 
         real_edges_list = np.array(list(real_edges_list)).astype(int)
-        real_sources = list(real_edges_list[:, 0]) if len(real_edges_list) > 0 else []
-        real_destinations = list(real_edges_list[:, 1]) if len(real_edges_list) > 0 else []
 
-        sources = list(negative_edges.keys()) + real_sources
-        negative_destinations = np.array(list(negative_edges.values())).reshape(-1)
-        negative_samples = np.concatenate((negative_destinations, real_destinations)).astype(int)
+        if n_operation_list[k] > sample_to_generate:
+            sample_to_generate_tmp = n_operation_list[k] * 2
+
+        t = time.time()
+        negative_edges = sample(all_nodes, existing_edges, real_edges, sample_to_generate_tmp, 5,
+                                seed=seed)
+        # print(len(negative_edges))
+
+        sources = []
+        for src in list(negative_edges.keys()):
+            sources.extend([src] * len(negative_edges[src]))
+
+        negative_samples = np.array(list(chain(*negative_edges.values())))
 
         # We update nodes' memories after the sampling, in this case "idxs" are not used
         pos_prob, neg_prob = tgn.compute_edge_probabilities(sources,
@@ -335,12 +372,12 @@ with torch.no_grad():
                                                             idxs[-len(negative_samples):], n_neighbors,
                                                             generation=True, num_known_nodes=num_known_nodes)
 
-        neg_prob = neg_prob.cpu().numpy().reshape(-1)
-        neg_prob /= neg_prob.sum()
+        p_flatten = neg_prob.flatten().cpu().numpy()
+        p_flatten = softmax(p_flatten)
 
         n_operations = n_operation_list[k]
         # print("n operations", n_operations)
-        idx_sampled = np.random.choice(np.arange(len(neg_prob)), p=neg_prob, size=n_operations, replace=False)
+        idx_sampled = np.random.choice(np.arange(len(neg_prob)), p=p_flatten, size=n_operations, replace=False)
         last_ts += 1
 
         new_sources = []
@@ -373,7 +410,7 @@ with torch.no_grad():
         pyg.edge_index_t = edge_index_t
         pyg.n_operations = n_operations
 
-        torch.save(pyg, "./generated_data/{}/generated_{}_graphs/TGN/{}_{}/graph_{}.pt".format(perc_train, dataset_name, factor, end_filename, k))
+        torch.save(pyg, "./generated_data/{}/generated_{}_graphs/TGN/{}/{}/{}_{}/graph_{}.pt".format(perc_train, dataset_name, seed, sample_size, factor, end_filename, k))
 
 print("Graphs saved")
 

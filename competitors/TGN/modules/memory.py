@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 
 from collections import defaultdict
 from copy import deepcopy
@@ -37,6 +38,15 @@ class Memory(nn.Module):
       self.messages[node].extend(node_id_to_messages[node])
 
   def get_memory(self, node_idxs):
+
+    node_idxs = np.array(node_idxs)
+    novel_nodes = node_idxs[np.where((node_idxs < self.memory.shape[0]) == False)]
+
+    if len(novel_nodes) > 0:
+      memory_new = torch.zeros((self.memory.shape[0] + len(novel_nodes), self.memory.shape[1]), device=self.device)
+      memory_new[:-len(novel_nodes)] = self.memory[:]
+      self.memory = memory_new
+
     return self.memory[node_idxs, :]
 
   def set_memory(self, node_idxs, values):

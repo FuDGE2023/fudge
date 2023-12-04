@@ -11,17 +11,18 @@ import statistics
 import networkx as nx
 import torch_geometric
 import gc
+from scipy.special import softmax
+from itertools import chain
+
 
 from regressor import DiscreteRegressor
 
-def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negative_edges: int, tries=5):
+def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negative_edges: int, tries=5, all=False, seed=123456):
     negative_edges = dict()
+    np.random.seed(seed)
 
-    while len(negative_edges) < n_negative_edges:
-        if tries <= 0:
-            break
-
-        for src in np.random.choice(list(all_nodes), size=n_negative_edges):
+    if all:
+        for src in range(len(all_nodes)):
             negatives = set(all_nodes)
 
             if src in existing_edges.keys():
@@ -34,13 +35,42 @@ def sample(all_nodes: set, existing_edges: dict, positive_edges: dict, n_negativ
                 negatives = negatives - positive_edges[src]
 
             if len(negatives) > 0:
-                negative_edges[src] = np.random.choice(list(negatives), size=1)
+                if src not in negative_edges.keys():
+                    negative_edges[src] = []
 
-            if len(negative_edges) >= n_negative_edges:
-                tries = 0
+                negative_edges[src].extend(list(negatives))
+    else:
+
+        negative_edges_cont = 0
+
+        while negative_edges_cont < n_negative_edges:
+            if tries <= 0:
                 break
 
-        tries -= 1
+            for src in np.random.choice(list(all_nodes), size=n_negative_edges):
+                negatives = set(all_nodes)
+
+                if src in existing_edges.keys():
+                    negatives = negatives - set(existing_edges[src])
+
+                if src in negative_edges.keys():
+                    negatives = negatives - set(negative_edges[src])
+
+                #if src in positive_edges.keys():
+                #    negatives = negatives - positive_edges[src]
+
+                if len(negatives) > 0:
+                    if src not in negative_edges.keys():
+                        negative_edges[src] = []
+
+                    negative_edges[src].extend(np.random.choice(list(negatives), size=1))
+                    negative_edges_cont += 1
+
+                if negative_edges_cont >= n_negative_edges:
+                    tries = 0
+                    break
+
+            tries -= 1
 
     return negative_edges
 
@@ -87,6 +117,16 @@ ngh_dim = int(args.ngh_dim)
 n_degree = [int(x) for x in args.n_degree.split(",")]
 validation_set = True if args.validation_set == "True" else False
 end_filename = "val" if validation_set else "test"
+sample_size = args.sample_size
+seed = args.seed
+
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.cuda.manual_seed(seed)
+torch.use_deterministic_algorithms = True
+torch.backends.cudnn.benchmark = False
 
 factors = "{}_{}_{}".format(ngh_dim, n_degree[0], n_degree[1])
 
@@ -101,14 +141,14 @@ LEARNING_RATE = args.lr
 POS_DIM = args.pos_dim
 TOLERANCE = args.tolerance
 VERBOSITY = args.verbosity
-SEED = 12345  # args.seed
+SEED = args.seed
 TIME_DIM = args.time_dim
 REPLACE_PROB = args.replace_prob
 SELF_DIM = args.self_dim
 NGH_DIM = ngh_dim
 need_regressor = True if args.need_regressor == "True" else False
 assert (NUM_HOP < 3)  # only up to second hop is supported
-set_random_seed(SEED)
+
 logger, get_checkpoint_path, get_ngh_store_path, get_self_rep_path, get_prev_raw_path, best_model_path, \
 best_model_ngh_store_path = set_up_logger(args, sys_argv, dataset, n_degree, ngh_dim, perc_train)
 
@@ -171,7 +211,11 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (200 * args.bs, rlimit[1]))
 
 # model initialization
 # device_string = 'cuda:{}'.format(GPU) if torch.cuda.is_available() else 'cpu'
-device = torch.device('cpu')
+GPU = 0
+device_string = 'cuda:{}'.format(GPU) if torch.cuda.is_available() else 'cpu'
+#device_string = 'cpu'
+device = torch.device(device_string)
+
 feat_dim = n_feat.shape[1]
 e_feat_dim = e_feat.shape[1]
 time_dim = TIME_DIM
@@ -195,16 +239,15 @@ nat.to(device)
 nat.reset_store()
 nat.reset_self_rep()
 
-nat.load_state_dict(torch.load(best_model_path))
+nat.load_state_dict(torch.load(best_model_path, map_location=device))
 
 nat.set_seed(SEED)
 
 with torch.no_grad():
     nat = nat.eval()
 
-
-    if not os.path.exists("./generated_data/{}/generated_{}_graphs/NAT/{}_{}".format(perc_train, DATA, factors, end_filename)):
-        os.makedirs("./generated_data/{}/generated_{}_graphs/NAT/{}_{}".format(perc_train, DATA, factors, end_filename))
+    if not os.path.exists("./generated_data/{}/generated_{}_graphs/NAT/{}/{}/{}_{}".format(perc_train, DATA, seed, sample_size, factors, end_filename)):
+        os.makedirs("./generated_data/{}/generated_{}_graphs/NAT/{}/{}/{}_{}".format(perc_train, DATA, seed, sample_size, factors, end_filename))
     graph = nx.DiGraph()
 
     for source, destination, label, id, ts in zip(train_src_l, train_tgt_l,
@@ -222,7 +265,7 @@ with torch.no_grad():
             else:
                 graph.remove_edge(source, destination)
 
-    n_neighbors = 10  # default for TGN
+    n_neighbors = 10
 
     edges = np.array(list(graph.edges(data=True)))
 
@@ -254,7 +297,7 @@ with torch.no_grad():
 
     need_regressor = True if args.need_regressor == "True" else False
 
-    regressor = DiscreteRegressor(train_set, need_regressor=need_regressor, seed=SEED)
+    regressor = DiscreteRegressor(train_set, need_regressor=need_regressor, seed=seed)
     n_operation_list = regressor.sample(num_generations)
 
     # num_generations = 1
@@ -305,35 +348,35 @@ with torch.no_grad():
                 real_edges[s].add(d)
         # print(len(real_edges))
 
-        if validation_set:
-            sample_to_generate = 500
-        else:
-            sample_to_generate = 1000
+        sample_to_generate = sample_size
+
+        sample_to_generate_tmp = sample_size
+
+        if n_operation_list[k] > sample_to_generate:
+            sample_to_generate_tmp = n_operation_list[k] * 2
 
         t = time.time()
-        negative_edges = sample(all_nodes, existing_edges, real_edges, sample_to_generate, 2)
-
+        negative_edges = sample(all_nodes, existing_edges, real_edges, sample_to_generate_tmp, 5, seed=seed)
         # print(len(negative_edges))
 
-        real_edges_list = np.array(list(real_edges_list)).astype(int)
-        real_sources = list(real_edges_list[:, 0]) if len(real_edges_list) > 0 else []
-        real_destinations = list(real_edges_list[:, 1]) if len(real_edges_list) > 0 else []
+        sources = []
+        for src in list(negative_edges.keys()):
+            sources.extend([src] * len(negative_edges[src]))
 
-        sources = list(negative_edges.keys()) + real_sources
-        negative_destinations = np.array(list(negative_edges.values())).reshape(-1)
-        negative_samples = np.concatenate((negative_destinations, real_destinations)).astype(int)
+        negative_samples = np.array(list(chain(*negative_edges.values())))
 
-        pos_prob, neg_prob = nat.contrast(np.array(sources), np.ones(len(negative_samples), dtype=int), negative_samples,
+        pos_prob, neg_prob = nat.contrast(np.array(sources), np.ones(len(negative_samples), dtype=int),
+                                          negative_samples,
                                           np.full(shape=len(negative_samples),
-                                                  fill_value=last_ts + 1), idxs[-len(negative_samples):])
+                                                  fill_value=last_ts + 1), idxs[-len(negative_samples):],
+                                          generation=True)
 
-        neg_prob = neg_prob.cpu().numpy().reshape(-1)
-        neg_prob /= neg_prob.sum()
-        # print(neg_prob)
+        p_flatten = neg_prob.flatten().cpu().numpy()
+        p_flatten = softmax(p_flatten)
 
         n_operations = n_operation_list[k]
 
-        idx_sampled = np.random.choice(np.arange(len(neg_prob)), p=neg_prob, size=n_operations, replace=False)
+        idx_sampled = np.random.choice(np.arange(len(neg_prob)), p=p_flatten, size=n_operations, replace=False)
         last_ts += 1
 
         for idx in idx_sampled:
@@ -353,6 +396,9 @@ with torch.no_grad():
             else:
                 print("here")
 
+        nat.update_memory_after_generation(np.array(sources[-n_operations:]), np.array(destinations[-n_operations:]),
+                                           np.array(timestamps[-n_operations:]), np.array(idxs[-n_operations:]))
+
         pyg = torch_geometric.utils.convert.from_networkx(graph)
         pyg.x = torch.ones((graph.number_of_nodes(), 1))
         edge_index_t = torch.cat((pyg.edge_index[1].reshape(1, pyg.edge_index[1].shape[0]),
@@ -361,8 +407,8 @@ with torch.no_grad():
         pyg.edge_index_t = edge_index_t
         pyg.n_operations = n_operations
 
-        torch.save(pyg, "./generated_data/{}/generated_{}_graphs/NAT/{}_{}/graph_{}.pt".format(
-            perc_train, DATA, factors, end_filename, k))
+        torch.save(pyg, "./generated_data/{}/generated_{}_graphs/NAT/{}/{}/{}_{}/graph_{}.pt".format(
+            perc_train, DATA, seed, sample_size, factors, end_filename, k))
 
 
 

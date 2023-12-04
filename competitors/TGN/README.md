@@ -20,20 +20,20 @@ python utils/preprocess_data.py --data dataset_name --extension dataset_extensio
 
 2) Training
 ```
-python train_self_supervised.py -d dataset_name --use_memory --n_runs 1 --n_epoch 1000 --gpu 2 --factor graph_attention --perc_train 0.7 --patience 20
+python train_self_supervised.py -d dataset_name --use_memory --n_runs 1 --n_epoch 1000 --gpu 2 --factor graph_attention --perc_train 0.7 --patience 20 --different_new_nodes
 ```
 
 3) Graph generation
 ```
-python generate_graphs.py -d dataset_name --use_memory --need_regressor True --factor graph_attention --perc_train 0.7 --validation_set True
+python generate_graphs.py -d dataset_name --use_memory --need_regressor True --factor graph_attention --perc_train 0.7 --validation_set True --sample_size size --seed 12345 --different_new_nodes
 ```
 
 4) WL score
 ```
-python compute_wl.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor graph_attention --validation_set True
+python compute_wl.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor graph_attention --validation_set True --sample_size size --seed 12345
 ```
 
 5) Graph statistics
 ```
-python compute_statistics.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor graph_attention --validation_set True
+python compute_statistics.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor graph_attention --sample_size size --seed 12345 
 ```

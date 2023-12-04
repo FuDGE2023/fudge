@@ -29,7 +29,7 @@ def eval_one_epoch(hint, tgan, sampler, src, tgt, ts, label, e_id, bs=32):
 
       size = len(src_l_cut)
       _, bad_l_cut = sampler.sample(size)
-      pos_prob, neg_prob = tgan.contrast(src_l_cut, tgt_l_cut, bad_l_cut, ts_l_cut, e_l_cut, test=True)
+      pos_prob, neg_prob = tgan.contrast(src_l_cut, tgt_l_cut, bad_l_cut, ts_l_cut, e_l_cut, generation=False)
 
       pred_score = np.concatenate([(pos_prob).cpu().numpy(), (neg_prob).cpu().numpy()])
       pred_label = pred_score > 0.5

@@ -29,6 +29,8 @@ parser.add_argument('--extension', type=str)
 parser.add_argument('--perc_train', type=float)
 parser.add_argument('--factor', type=str)
 parser.add_argument('--validation_set', type=str)
+parser.add_argument('--seed', type=int)
+parser.add_argument('--sample_size', type=int)
 
 
 args = parser.parse_args()
@@ -37,13 +39,13 @@ dataset = args.data
 dataset_extension = args.extension
 perc_train = args.perc_train
 factor = args.factor
-end_filename = "val" if args.validation_set == "True" else "test"
+end_filename = "test"
+sample_size = args.sample_size
+seed = args.seed
 
 print(sys.argv)
 
 snap=loadList('../../data/{}'.format(dataset+dataset_extension))
-
-seed = 12345
 
 amount = len(snap)
 
@@ -65,8 +67,8 @@ if type(snap[0]) == list:
 
 G_real = test_set[-1]
 
-G_pred = torch.load("./generated_data/{}/generated_{}_graphs/TGL/{}_{}/graph_{}.pt"
-                    .format(perc_train, dataset, factor, end_filename, len(test_set)-1))
+G_pred = torch.load("./generated_data/{}/generated_{}_graphs/TGL/{}/{}/{}_{}/graph_{}.pt"
+                    .format(perc_train, dataset, seed, sample_size, factor, end_filename, len(test_set)-1))
 
 print("G real")
 graph_statistics(G_real)

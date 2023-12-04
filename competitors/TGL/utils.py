@@ -53,7 +53,7 @@ def parse_config(f):
     train_param = conf['train'][0]
     return sample_param, memory_param, gnn_param, train_param
 
-def to_dgl_blocks(ret, hist, reverse=False, cuda=True):
+def to_dgl_blocks(ret, hist, device, reverse=False, cuda=True):
     mfgs = list()
     for r in ret:
         if not reverse:
@@ -68,20 +68,20 @@ def to_dgl_blocks(ret, hist, reverse=False, cuda=True):
             b.dstdata['ts'] = torch.from_numpy(r.ts())
         b.edata['ID'] = torch.from_numpy(r.eid())
         if cuda:
-            mfgs.append(b.to('cuda:0'))
+            mfgs.append(b.to(device))
         else:
             mfgs.append(b)
     mfgs = list(map(list, zip(*[iter(mfgs)] * hist)))
     mfgs.reverse()
     return mfgs
 
-def node_to_dgl_blocks(root_nodes, ts, cuda=True):
+def node_to_dgl_blocks(root_nodes, ts, device, cuda=True):
     mfgs = list()
     b = dgl.create_block(([],[]), num_src_nodes=root_nodes.shape[0], num_dst_nodes=root_nodes.shape[0])
     b.srcdata['ID'] = torch.from_numpy(root_nodes)
     b.srcdata['ts'] = torch.from_numpy(ts)
     if cuda:
-        mfgs.insert(0, [b.to('cuda:0')])
+        mfgs.insert(0, [b.to(device)])
     else:
         mfgs.insert(0, [b])
     return mfgs
@@ -92,7 +92,7 @@ def mfgs_to_cuda(mfgs):
             mfg[i] = mfg[i].to('cuda:0')
     return mfgs
 
-def prepare_input(mfgs, node_feats, edge_feats, combine_first=False, pinned=False, nfeat_buffs=None, efeat_buffs=None, nids=None, eids=None):
+def prepare_input(mfgs, node_feats, edge_feats, device, combine_first=False, pinned=False, nfeat_buffs=None, efeat_buffs=None, nids=None, eids=None):
     if combine_first:
         for i in range(len(mfgs[0])):
             if mfgs[0][i].num_src_nodes() > mfgs[0][i].num_dst_nodes():
@@ -104,7 +104,7 @@ def prepare_input(mfgs, node_feats, edge_feats, combine_first=False, pinned=Fals
                 uts = unts[:, 0]
                 unid = unts[:, 1]
                 # import pdb; pdb.set_trace()
-                b = dgl.create_block((idx + num_dst, mfgs[0][i].edges()[1]), num_src_nodes=unts.shape[0] + num_dst, num_dst_nodes=num_dst, device=torch.device('cuda:0'))
+                b = dgl.create_block((idx + num_dst, mfgs[0][i].edges()[1]), num_src_nodes=unts.shape[0] + num_dst, num_dst_nodes=num_dst, device=device)
                 b.srcdata['ts'] = torch.cat([mfgs[0][i].srcdata['ts'][:num_dst], uts], dim=0)
                 b.srcdata['ID'] = torch.cat([mfgs[0][i].srcdata['ID'][:num_dst], unid], dim=0)
                 b.edata['dt'] = mfgs[0][i].edata['dt']
@@ -121,11 +121,11 @@ def prepare_input(mfgs, node_feats, edge_feats, combine_first=False, pinned=Fals
                 else:
                     idx = b.srcdata['ID'].cpu().long()
                 torch.index_select(node_feats, 0, idx, out=nfeat_buffs[i][:idx.shape[0]])
-                b.srcdata['h'] = nfeat_buffs[i][:idx.shape[0]].cuda(non_blocking=True)
+                b.srcdata['h'] = nfeat_buffs[i][:idx.shape[0]].to(device)
                 i += 1
             else:
                 srch = node_feats[b.srcdata['ID'].long()].float()
-                b.srcdata['h'] = srch.cuda()
+                b.srcdata['h'] = srch.to(device)
     i = 0
     if edge_feats is not None:
         for mfg in mfgs:
@@ -137,11 +137,11 @@ def prepare_input(mfgs, node_feats, edge_feats, combine_first=False, pinned=Fals
                         else:
                             idx = b.edata['ID'].cpu().long()
                         torch.index_select(edge_feats, 0, idx, out=efeat_buffs[i][:idx.shape[0]])
-                        b.edata['f'] = efeat_buffs[i][:idx.shape[0]].cuda(non_blocking=True)
+                        b.edata['f'] = efeat_buffs[i][:idx.shape[0]].to(device)#.cuda(non_blocking=True)
                         i += 1
                     else:
                         srch = edge_feats[b.edata['ID'].long()].float()
-                        b.edata['f'] = srch.cuda()
+                        b.edata['f'] = srch.to(device)#.cuda()
     return mfgs
 
 def get_ids(mfgs, node_feats, edge_feats):

@@ -40,7 +40,7 @@ def create_histogram(input_dict):
     return [counts.get(i, 0) for i in range(max(counts) + 1)]
 
 
-def parallel_WL_test(params, graphs_indexes, test_set):
+def WL_test(params, graphs_indexes, data):
 
     max_diameter = params['max_diameter']
     baseline = params['baseline']
@@ -53,10 +53,8 @@ def parallel_WL_test(params, graphs_indexes, test_set):
         G_pred = torch.load("{}/{}/graph_{}.pt".format(full_generation_path, baseline, graph_index))
         G_pred = torch_geometric.utils.convert.to_networkx(G_pred)
 
-        G_real = test_set[graph_index]
+        G_real = data[graph_index]
         G_real = torch_geometric.utils.convert.to_networkx(G_real)
-
-        max_nodes = max([G_real.number_of_nodes(), G_pred.number_of_nodes()])
 
         labels = {}
 
@@ -79,39 +77,35 @@ def parallel_WL_test(params, graphs_indexes, test_set):
         for g in [G_real, G_pred]:
             X.append([list(g.edges()), labels[g].copy()])
 
-
-        res = compute_similarity(X, n_iter=max_diameter * 2, graph_format="dictionary", similarity_metric="cosine",
+        res = compute_similarity(X, n_iter=max_diameter *2, graph_format="dictionary", similarity_metric="cosine",
                                  max_diameter=max_diameter)
 
+        # print(res)
         final_res = (res[0][0][1], res[1][0][1], res[2][0][1])
         results.append(final_res)
 
     return results
 
-def compute_wl(params, test_set):
+def compute_wl(params, data):
 
-    n_jobs = 1
+    graphs_indexes = np.arange(params['num_generations'])
 
-    graphs_indexes = np.array_split(np.arange(params['num_generations']), n_jobs)
-
-    last_g_networkx = torch_geometric.utils.convert.to_networkx(test_set[-1])
+    last_g_networkx = torch_geometric.utils.convert.to_networkx(data[-1])
     max_diameter = max([max(j.values()) for (i, j) in nx.shortest_path_length(last_g_networkx)])
     params['max_diameter'] = max_diameter
 
     t = time()
 
-    results = Parallel(n_jobs=n_jobs, prefer='processes')(
-        delayed(parallel_WL_test)(params, i, test_set) for i in graphs_indexes)
+    results = WL_test(params, graphs_indexes, data)  # range(params['num_generations']))
     print("End wl test", time() - t)
 
     results_all_steps = []
     results_coloring_stable = []
     results_diameter = []
     for x in results:
-        x = np.array(x)
-        results_all_steps.extend(x[:, 0])
-        results_coloring_stable.extend(x[:, 1])
-        results_diameter.extend(x[:, 2])
+        results_all_steps.append(x[0])
+        results_coloring_stable.append(x[1])
+        results_diameter.append(x[2])
 
     results_all_steps = np.array(results_all_steps)
     mean_all_steps = np.around(np.mean(results_all_steps), decimals=4)
@@ -132,11 +126,11 @@ def compute_wl(params, test_set):
                                                            mean_diameter, percentile_diameter))
 
 
-    if not os.path.exists("{}/{}".format(params['space_wl_results'], params['perc_train'])):
-        os.makedirs("{}/{}".format(params['space_wl_results'], params['perc_train']))
+    if not os.path.exists("{}/{}/{}".format(params['space_wl_results'], params['perc_train'], params['seed'])):
+        os.makedirs("{}/{}/{}".format(params['space_wl_results'], params['perc_train'], params['seed']))
 
 
-    f = open("{}/{}/{}_{}.tsv".format(params['space_wl_results'], params['perc_train'], params['dataset'], params['baseline']), "w")
+    f = open("{}/{}/{}/{}_{}.tsv".format(params['space_wl_results'], params['perc_train'], params['seed'], params['dataset'], params['baseline']), "w")
     f.write("Count\tAll_Step\tColoring_Stable\tDiameter\n")
     for i in range(len(results_all_steps)):
         f.write("{}\t{}\t{}\t{}\n".format(i, results_all_steps[i], results_coloring_stable[i], results_diameter[i]))

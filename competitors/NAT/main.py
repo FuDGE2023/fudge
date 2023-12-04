@@ -51,6 +51,10 @@ perc_train = float(args.perc_train)
 ngh_dim = int(args.ngh_dim)
 n_degree = [int(x) for x in args.n_degree.split(",")]
 
+print(dataset, ngh_dim, n_degree)
+
+# 8 16 32 -- 8 16 32 -- 2 4
+
 BATCH_SIZE = args.bs
 NUM_NEIGHBORS = n_degree
 NUM_EPOCH = args.n_epoch
@@ -62,13 +66,15 @@ LEARNING_RATE = args.lr
 POS_DIM = args.pos_dim
 TOLERANCE = args.tolerance
 VERBOSITY = args.verbosity
-SEED = 12345#args.seed
+SEED = args.seed
 TIME_DIM = args.time_dim
 REPLACE_PROB = args.replace_prob
 SELF_DIM = args.self_dim
 NGH_DIM = ngh_dim
+# train_percentage = train_percentage#args.train_percentage
 assert(NUM_HOP < 3) # only up to second hop is supported
-set_random_seed(SEED)
+#set_random_seed(SEED)
+
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
@@ -76,6 +82,7 @@ torch.cuda.manual_seed_all(SEED)
 torch.cuda.manual_seed(SEED)
 torch.use_deterministic_algorithms = True
 torch.backends.cudnn.benchmark = False
+
 logger, get_checkpoint_path, get_ngh_store_path, get_self_rep_path, get_prev_raw_path, best_model_path,\
 best_model_ngh_store_path = set_up_logger(args, sys_argv, dataset, n_degree, ngh_dim, perc_train)
 
@@ -110,14 +117,14 @@ early_stoppers = []
 total_time = []
 for run in range(args.run):
   if args.mode == 't':
-    logger.info('Transductive training...')
+    #logger.info('Transductive training...')
     valid_train_flag = (ts_l <= val_time)
     valid_val_flag = (ts_l <= test_time) * (ts_l > val_time)
     valid_test_flag = ts_l > test_time
 
   else:
     assert(args.mode == 'i')
-    logger.info('Inductive training...')
+    #logger.info('Inductive training...')
     # pick some nodes to mask (i.e. reserved for testing) for inductive setting
     total_node_set = set(np.unique(np.hstack([g_df.u.values, g_df.i.values])))
     num_total_unique_nodes = len(total_node_set)
@@ -130,7 +137,7 @@ for run in range(args.run):
     all_train_val_flag = ts_l <= test_time
     inductive_train_val_flag = (ts_l <= test_time) * (none_mask_node_flag <= 0.5)
     valid_test_flag = (ts_l > test_time) * (none_mask_node_flag < 0.5)  # test edges must contain at least one masked node
-    logger.info('Sampled {} nodes (10 %) which are masked in training and reserved for testing...'.format(len(mask_node_set)))
+    #logger.info('Sampled {} nodes (10 %) which are masked in training and reserved for testing...'.format(len(mask_node_set)))
 
   # split data according to the mask
   train_size_regression, val_size_regression = get_split(DATA, perc_train, g_df)
@@ -159,9 +166,20 @@ for run in range(args.run):
                                                                                                                  label_l[:train_size_regression]
     inductive_train_val_src_l, inductive_train_val_tgt_l, inductive_train_val_ts_l, inductive_train_val_e_idx_l, inductive_train_val_label_l = src_l[inductive_train_val_flag], tgt_l[inductive_train_val_flag], ts_l[inductive_train_val_flag], e_idx_l[inductive_train_val_flag], label_l[inductive_train_val_flag]
 
+  # train_src_l, train_tgt_l, train_ts_l, train_e_idx_l, train_label_l = src_l[valid_train_flag], tgt_l[valid_train_flag], ts_l[valid_train_flag], e_idx_l[valid_train_flag], label_l[valid_train_flag]
+  # val_src_l, val_tgt_l, val_ts_l, val_e_idx_l, val_label_l = src_l[valid_val_flag], tgt_l[valid_val_flag], ts_l[valid_val_flag], e_idx_l[valid_val_flag], label_l[valid_val_flag]
+  # test_src_l, test_tgt_l, test_ts_l, test_e_idx_l, test_label_l = src_l[valid_test_flag], tgt_l[valid_test_flag], ts_l[valid_test_flag], e_idx_l[valid_test_flag], label_l[valid_test_flag]
+  #
+  # if args.mode == 'i':
+  #   all_train_val_src_l, all_train_val_tgt_l, all_train_val_ts_l, all_train_val_e_idx_l, all_train_val_label_l = src_l[all_train_val_flag], tgt_l[all_train_val_flag], ts_l[all_train_val_flag], e_idx_l[all_train_val_flag], label_l[all_train_val_flag]
+  #   inductive_train_val_src_l, inductive_train_val_tgt_l, inductive_train_val_ts_l, inductive_train_val_e_idx_l, inductive_train_val_label_l = src_l[inductive_train_val_flag], tgt_l[inductive_train_val_flag], ts_l[inductive_train_val_flag], e_idx_l[inductive_train_val_flag], label_l[inductive_train_val_flag]
+
   train_data = train_src_l, train_tgt_l, train_ts_l, train_e_idx_l, train_label_l
   val_data = val_src_l, val_tgt_l, val_ts_l, val_e_idx_l, val_label_l
   train_val_data = (train_data, val_data)
+
+  #print(len(train_src_l), len(val_src_l), len(test_src_l))
+  # exit(0)
 
   # # create random samplers to generate train/val/test instances
   train_rand_sampler = RandEdgeSampler((train_src_l, ), (train_tgt_l, ))
@@ -205,7 +223,7 @@ for run in range(args.run):
   train_val(train_val_data, nat, args.mode, BATCH_SIZE, NUM_EPOCH, criterion, optimizer, early_stopper, rand_samplers, logger, model_dim, n_hop=NUM_HOP)
 
   # final testing
-  print("_*"*50)
+  #print("_*"*50)
   if args.mode == 'i':
     nat.reset_store()
     nat.reset_self_rep()
@@ -213,7 +231,7 @@ for run in range(args.run):
   test_start = time.time()
   test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for {} nodes'.format(args.mode), nat, test_rand_sampler, test_src_l, test_tgt_l, test_ts_l, test_label_l, test_e_idx_l)
   test_end = time.time()
-  logger.info('Test statistics: {} all nodes -- acc: {}, auc: {}, ap: {}, time: {}'.format(args.mode, test_acc, test_auc, test_ap, test_end - test_start))
+  #logger.info('Test statistics: {} all nodes -- acc: {}, auc: {}, ap: {}, time: {}'.format(args.mode, test_acc, test_auc, test_ap, test_end - test_start))
   test_new_new_acc, test_new_new_ap, test_new_new_auc, test_new_old_acc, test_new_old_ap, test_new_old_auc = [-1]*6
   if args.mode == 'i':
     inductive_auc.append(test_auc)
@@ -224,26 +242,26 @@ for run in range(args.run):
   test_times.append(test_end - test_start)
   early_stoppers.append(early_stopper.best_epoch + 1)
   # save model
-  logger.info('Saving NAT model ...')
-  torch.save(nat.state_dict(), best_model_path)
-  logger.info('NAT model saved')
+  #logger.info('Saving NAT model ...')
+  #torch.save(nat.state_dict(), best_model_path)
+  #logger.info('NAT model saved')
 
   # save one line result
   save_oneline_result('log/', args, [test_acc, test_auc, test_ap, test_new_new_acc, test_new_new_ap, test_new_new_auc, test_new_old_acc, test_new_old_ap, test_new_old_auc], dataset, n_degree)
   # save walk_encodings_scores
   total_end = time.time()
-  print("NAT experiment statistics:")
-  if args.mode == "t":
-    nat_results(logger, transductive_auc, "transductive_auc")
-    nat_results(logger, transductive_ap, "transductive_ap")
-  else:
-    nat_results(logger, inductive_auc, "inductive_auc")
-    nat_results(logger, inductive_ap, "inductive_ap")
+  #print("NAT experiment statistics:")
+  #if args.mode == "t":
+  #  nat_results(logger, transductive_auc, "transductive_auc")
+  #  nat_results(logger, transductive_ap, "transductive_ap")
+  #else:
+  #  nat_results(logger, inductive_auc, "inductive_auc")
+  #  nat_results(logger, inductive_ap, "inductive_ap")
 
-  nat_results(logger, test_times, "test_times")
-  nat_results(logger, early_stoppers, "early_stoppers")
+  #nat_results(logger, test_times, "test_times")
+  #nat_results(logger, early_stoppers, "early_stoppers")
   total_time.append(total_end - total_start)
-  nat_results(logger, total_time, "total_time")
+  #nat_results(logger, total_time, "total_time")
 
   del train_data, val_data
 

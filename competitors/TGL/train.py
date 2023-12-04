@@ -37,6 +37,9 @@ def set_seed(seed):
 
 set_seed(0)
 data = args.data
+device_string = 'cuda:{}'.format(args.gpu) if torch.cuda.is_available() else 'cpu'
+#device_string = 'cpu'
+device = torch.device(device_string)
 
 node_feats, edge_feats = load_feat(data, args.rand_edge_features, args.rand_node_features)
 g, df = load_graph(data)
@@ -49,8 +52,8 @@ gnn_dim_edge = 0 if edge_feats is None else edge_feats.shape[1]
 combine_first = False
 if 'combine_neighs' in train_param and train_param['combine_neighs']:
     combine_first = True
-model = GeneralModel(gnn_dim_node, gnn_dim_edge, sample_param, memory_param, gnn_param, train_param, combined=combine_first).cuda()
-mailbox = MailBox(memory_param, g['indptr'].shape[0] - 1, gnn_dim_edge) if memory_param['type'] != 'none' else None
+model = GeneralModel(gnn_dim_node, gnn_dim_edge, sample_param, memory_param, gnn_param, train_param, device=device, combined=combine_first).to(device)
+mailbox = MailBox(memory_param, g['indptr'].shape[0] - 1, gnn_dim_edge, device) if memory_param['type'] != 'none' else None
 creterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=train_param['lr'])
 if 'all_on_gpu' in train_param and train_param['all_on_gpu']:
@@ -94,10 +97,10 @@ def eval(mode='val'):
                     sampler.sample(root_nodes, ts)
                 ret = sampler.get_ret()
             if gnn_param['arch'] != 'identity':
-                mfgs = to_dgl_blocks(ret, sample_param['history'])
+                mfgs = to_dgl_blocks(ret, sample_param['history'], device)
             else:
-                mfgs = node_to_dgl_blocks(root_nodes, ts)
-            mfgs = prepare_input(mfgs, node_feats, edge_feats, combine_first=combine_first)
+                mfgs = node_to_dgl_blocks(root_nodes, ts, device)
+            mfgs = prepare_input(mfgs, node_feats, edge_feats, combine_first=combine_first, device=device)
             if mailbox is not None:
                 mailbox.prep_input_mails(mfgs[0])
             pred_pos, pred_neg = model(mfgs, neg_samples=neg_samples)
@@ -115,7 +118,7 @@ def eval(mode='val'):
                 mem_edge_feats = edge_feats[eid] if edge_feats is not None else None
                 block = None
                 if memory_param['deliver_to'] == 'neighbors':
-                    block = to_dgl_blocks(ret, sample_param['history'], reverse=True)[0][0]
+                    block = to_dgl_blocks(ret, sample_param['history'], reverse=True, device=device)[0][0]
                 mailbox.update_mailbox(model.memory_updater.last_updated_nid, model.memory_updater.last_updated_memory, root_nodes, ts, mem_edge_feats, block, neg_samples=neg_samples)
                 mailbox.update_memory(model.memory_updater.last_updated_nid, model.memory_updater.last_updated_memory, root_nodes, model.memory_updater.last_updated_ts, neg_samples=neg_samples)
         if mode == 'val':
@@ -157,6 +160,7 @@ for e in range(train_param['epoch']):
     time_prep = 0
     time_tot = 0
     total_loss = 0
+    train_time = time.time()
     # training
     model.train()
     if sampler is not None:
@@ -178,10 +182,10 @@ for e in range(train_param['epoch']):
             time_sample += ret[0].sample_time()
         t_prep_s = time.time()
         if gnn_param['arch'] != 'identity':
-            mfgs = to_dgl_blocks(ret, sample_param['history'])
+            mfgs = to_dgl_blocks(ret, sample_param['history'], device)
         else:
-            mfgs = node_to_dgl_blocks(root_nodes, ts)
-        mfgs = prepare_input(mfgs, node_feats, edge_feats, combine_first=combine_first)
+            mfgs = node_to_dgl_blocks(root_nodes, ts, device)
+        mfgs = prepare_input(mfgs, node_feats, edge_feats, combine_first=combine_first, device=device)
         if mailbox is not None:
             mailbox.prep_input_mails(mfgs[0])
         time_prep += time.time() - t_prep_s
@@ -198,16 +202,22 @@ for e in range(train_param['epoch']):
             mem_edge_feats = edge_feats[eid] if edge_feats is not None else None
             block = None
             if memory_param['deliver_to'] == 'neighbors':
-                block = to_dgl_blocks(ret, sample_param['history'], reverse=True)[0][0]
+                block = to_dgl_blocks(ret, sample_param['history'], reverse=True, device=device)[0][0]
             mailbox.update_mailbox(model.memory_updater.last_updated_nid, model.memory_updater.last_updated_memory, root_nodes, ts, mem_edge_feats, block)
             mailbox.update_memory(model.memory_updater.last_updated_nid, model.memory_updater.last_updated_memory, root_nodes, model.memory_updater.last_updated_ts)
         time_prep += time.time() - t_prep_s
         time_tot += time.time() - t_tot_s
+
+    print("Training")
+    print(time.time() - train_time)
+    val_time = time.time()
     ap, auc = eval('val')
     if e > 2 and ap > best_ap:
         best_e = e
         best_ap = ap
         torch.save(model.state_dict(), path_saver)
+    print("Validation")
+    print(time.time() - val_time)
     print('\ttrain loss:{:.4f}  val ap:{:4f}  val auc:{:4f}'.format(total_loss, ap, auc))
     print('\ttotal time:{:.2f}s sample time:{:.2f}s prep time:{:.2f}s'.format(time_tot, time_sample, time_prep))
 
@@ -226,3 +236,4 @@ if args.eval_neg_samples > 1:
     print('\ttest AP:{:4f}  test MRR:{:4f}'.format(ap, auc))
 else:
     print('\ttest AP:{:4f}  test AUC:{:4f}'.format(ap, auc))
+

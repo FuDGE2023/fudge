@@ -6,9 +6,9 @@ import torch
 import torch_geometric
 from time import time
 
-def Loss(x, n, m, G_real):
+def Loss(x, n, m, G_real, seed):
 
-    G_pred = powerlaw_cluster_graph(n, m, x, G_real.copy(), "", None, save_graphs=False)[0]
+    G_pred = powerlaw_cluster_graph(n, m, x, G_real.copy(), "", None, seed, save_graphs=False)[0]
     #G_pred = torch_geometric.utils.convert.to_networkx(G_pred)
 
     # print(G_pred)
@@ -34,11 +34,11 @@ def Loss(x, n, m, G_real):
                                      max_diameter=max_diameter)
     return res[0][0][1] # max iterations
 
-def optimizer_brute(x_min, x_max, x_step, n, m, G_real):
+def optimizer_brute(x_min, x_max, x_step, n, m, G_real, seed):
     loss_all = []
     x_list = np.arange(x_min,x_max,x_step)
     for x_test in tqdm(x_list):
-        loss_all.append(Loss(x_test, n, m, G_real))
+        loss_all.append(Loss(x_test, n, m, G_real, seed))
 
     x_optim = x_list[np.argmin(np.array(loss_all))]
     return x_optim
@@ -57,7 +57,7 @@ def _random_subset(seq, m):
         targets.add(x)
     return targets
 
-def powerlaw_cluster_graph(num_generations, m, p, G, full_generation_path, regressor, save_graphs=True):
+def powerlaw_cluster_graph(num_generations, m, p, G, full_generation_path, regressor, seed, save_graphs=True):
 
     graphs = []
 
@@ -132,8 +132,8 @@ def power_generator(train_graph, history, params):
 
     num_generations_opt = 1
     m = 1
-    p = optimizer_brute(0.0, 1.0, 0.1, num_generations_opt, m, train_graph)
+    p = optimizer_brute(0.0, 1.0, 0.1, num_generations_opt, m, train_graph, seed)
 
-    generated_graphs = powerlaw_cluster_graph(num_generations, m, p, history.copy(), full_generation_path, regressor)
+    generated_graphs = powerlaw_cluster_graph(num_generations, m, p, history.copy(), full_generation_path, regressor, seed)
 
     return generated_graphs

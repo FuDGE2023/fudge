@@ -183,25 +183,26 @@ def compute_similarity(X, n_iter=10, graph_format="dictionary", similarity_metri
 
     return all_steps, same_coloring, max_diameter
 
-def parallel_WL_test(params, graphs_indexes, data):
+def WL_test(params, graphs_indexes, data):
 
     max_diameter = params['max_diameter']
     dataset = params['dataset']
     perc_train = params['perc_train']
     factor = params['factor']
     end_filename = params['end_filename']
+    seed = params['seed']
+    sampling = params['sampling']
 
     results = []
     for graph_index in tqdm(graphs_indexes):
     #     print(graph_index)
 
-        G_pred = torch.load("./generated_data/{}/generated_{}_graphs/TGN/{}_{}/graph_{}.pt".format(perc_train, dataset, factor, end_filename, graph_index))
+        G_pred = torch.load("./generated_data/{}/generated_{}_graphs/TGN/{}/{}/{}_{}/graph_{}.pt".format(perc_train, dataset, seed, sampling, factor, end_filename, graph_index))
         G_pred = torch_geometric.utils.convert.to_networkx(G_pred)
 
         G_real = data[graph_index]
         G_real = torch_geometric.utils.convert.to_networkx(G_real)
 
-        max_nodes = max([G_real.number_of_nodes(), G_pred.number_of_nodes()])
 
         labels = {}
 
@@ -234,11 +235,7 @@ def parallel_WL_test(params, graphs_indexes, data):
     return results
 
 def compute_wl(params, data):
-
-
-    n_jobs = 1
-
-    graphs_indexes = np.array_split(np.arange(params['num_generations']), n_jobs)
+    graphs_indexes = np.arange(params['num_generations'])
 
     last_g_networkx = torch_geometric.utils.convert.to_networkx(data[-1])
     max_diameter = max([max(j.values()) for (i, j) in nx.shortest_path_length(last_g_networkx)])
@@ -246,18 +243,16 @@ def compute_wl(params, data):
 
     t = time()
 
-    results = Parallel(n_jobs=n_jobs, prefer='processes')(
-        delayed(parallel_WL_test)(params, i, data) for i in graphs_indexes)  # range(params['num_generations']))
+    results = WL_test(params, graphs_indexes, data)  # range(params['num_generations']))
     print("End wl test", time() - t)
 
     results_all_steps = []
     results_coloring_stable = []
     results_diameter = []
     for x in results:
-        x = np.array(x)
-        results_all_steps.extend(x[:, 0])
-        results_coloring_stable.extend(x[:, 1])
-        results_diameter.extend(x[:, 2])
+        results_all_steps.append(x[0])
+        results_coloring_stable.append(x[1])
+        results_diameter.append(x[2])
 
     results_all_steps = np.array(results_all_steps)
     mean_all_steps = np.around(np.mean(results_all_steps), decimals=4)
@@ -278,22 +273,24 @@ def compute_wl(params, data):
                                                            mean_diameter, percentile_diameter))
 
 
-    if not os.path.exists("./wl_results/{}/".format(params['perc_train'])):
-        os.makedirs("./wl_results/{}".format(params['perc_train']))
+    if not os.path.exists("./wl_results/{}/{}/{}".format(params['perc_train'], params['seed'], params['sampling'])):
+            os.makedirs("./wl_results/{}/{}/{}".format(params['perc_train'], params['seed'], params['sampling']))
 
-    f = open("./wl_results/{}/{}_{}_{}.tsv".format(params['perc_train'], params['dataset'], params['factor'], params['end_filename']), "w")
+    f = open("./wl_results/{}/{}/{}/{}_{}_{}.tsv".format(params['perc_train'], params['seed'], params['sampling'], params['dataset'], params['factor'], params['end_filename']), "w")
     f.write("Count\tAll_Step\tColoring_Stable\tDiameter\n")
     for i in range(len(results_all_steps)):
         f.write("{}\t{}\t{}\t{}\n".format(i, results_all_steps[i], results_coloring_stable[i], results_diameter[i]))
     f.close()
 
 
-parser = argparse.ArgumentParser('Interface for TGN framework')
+parser = argparse.ArgumentParser('Interface for computing WL similarity for the TGN framework')
 parser.add_argument('--data', type=str)
 parser.add_argument('--extension', type=str)
 parser.add_argument('--perc_train', type=float)
 parser.add_argument('--factor', type=str)
 parser.add_argument('--validation_set', type=str)
+parser.add_argument('--sample_size', type=str)
+parser.add_argument('--seed', type=str)
 
 
 args = parser.parse_args()
@@ -301,14 +298,16 @@ args = parser.parse_args()
 dataset = args.data
 dataset_extension = args.extension
 perc_train = args.perc_train
-factor = args.factor
 end_filename = "val" if args.validation_set == "True" else "test"
+sampling = args.sample_size
 
 print(sys.argv)
 
+factor = args.factor
+
 snap=loadList('../../data/{}'.format(dataset+dataset_extension))
 
-seed = 12345
+seed = int(args.seed)
 
 amount = len(snap)
 
@@ -338,6 +337,7 @@ params['num_generations'] = len(val_set) if end_filename == "val" else len(test_
 params['perc_train'] = perc_train
 params['factor'] = factor
 params['end_filename'] = end_filename
+params['sampling'] = sampling
 
 if end_filename == "val":
     compute_wl(params, val_set)

@@ -11,6 +11,9 @@ Parameters semantic:
 * --need_regressor --> True if the dataset can have multiple operations per timestamp, False otherwise
 * --config --> available configurations: config/TGN.yml, config/TGAT.yml, config/JODIE.yml, config/DySAT.yml
 * --factor -> TGL available variants: TGN, TGAT, JODIE, DySAT
+* --sample_size --> sample size for the generation phase
+* --seed
+
 
 Steps to run the experiments:
 1) TGL Sampler
@@ -32,20 +35,20 @@ python gen_graph.py --data snapshots_regression_bitcoin_alpha_edge_weights_0.7
 python train.py --data dataset_name+perc_train --config path_configuration --gpu 0
 
 Example:
-python train.py --data snapshots_regression_bitcoin_alpha_edge_weights --config config/TGN.yml --gpu 0
+python train.py --data snapshots_regression_bitcoin_alpha_edge_weights_0.7 --config config/TGN.yml --gpu 0
 ```
 
 4) Graph generation
 ```
-python generate_graphs.py --data dataset_name+perc_train --config path_configuration --gpu 0 --perc_train 0.7 --need_regressor True --validation_set True
+python generate_graphs.py --data dataset_name+perc_train --config path_configuration --gpu 0 --perc_train 0.7 --need_regressor True --validation_set True --sample_size size --seed 12345
 ```
 
 5) WL score
 ```
-python compute_wl.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --validation_set True
+python compute_wl.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --validation_set True --seed 12345 --sample_size size
 ```
 
 6) Graph statistics
 ```
-python compute_statistics.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --validation_set True
+python compute_statistics.py --data dataset_name --extension dataset_extension --perc_train 0.7 --factor TGN --sample_size size --seed 12345
 ```
